@@ -4,12 +4,27 @@
 
 namespace
 {
-    constexpr const char* moduleNames[] = { "EQ", "De-esser", "Compressor", "Saturator", "Autotune", "Delay", "Reverb" };
+    constexpr const char* moduleTypeNames[] = { "EQ", "De-esser", "Compressor", "Saturator", "Autotune", "Delay", "Reverb" };
 }
 
-const char* MentalsSuiteAudioProcessor::getModuleName (int moduleId) noexcept
+const char* MentalsSuiteAudioProcessor::getModuleTypeName (int moduleType) noexcept
 {
-    return moduleNames[(size_t) moduleId];
+    return moduleTypeNames[(size_t) moduleType];
+}
+
+std::unique_ptr<juce::AudioProcessor> MentalsSuiteAudioProcessor::createModuleProcessor (int moduleType)
+{
+    switch (moduleType)
+    {
+        case moduleEQ:         return std::make_unique<MultiModeEQAudioProcessor>();
+        case moduleDeEsser:    return std::make_unique<MentalsDeEsserAudioProcessor>();
+        case moduleCompressor: return std::make_unique<MentalsCompressorAudioProcessor>();
+        case moduleSaturator:  return std::make_unique<MentalsSaturatorAudioProcessor>();
+        case moduleAutotune:   return std::make_unique<MentalsAutotuneAudioProcessor>();
+        case moduleDelay:      return std::make_unique<MentalsDelayAudioProcessor>();
+        case moduleReverb:     return std::make_unique<MentalsReverbAudioProcessor>();
+        default:               jassertfalse; return nullptr;
+    }
 }
 
 MentalsSuiteAudioProcessor::MentalsSuiteAudioProcessor()
@@ -17,28 +32,12 @@ MentalsSuiteAudioProcessor::MentalsSuiteAudioProcessor()
           .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
           .withOutput ("Output", juce::AudioChannelSet::stereo(), true))
 {
-    moduleNodes[(size_t) moduleEQ]         = graph.addNode (std::make_unique<MultiModeEQAudioProcessor>());
-    moduleNodes[(size_t) moduleDeEsser]    = graph.addNode (std::make_unique<MentalsDeEsserAudioProcessor>());
-    moduleNodes[(size_t) moduleCompressor] = graph.addNode (std::make_unique<MentalsCompressorAudioProcessor>());
-    moduleNodes[(size_t) moduleSaturator]  = graph.addNode (std::make_unique<MentalsSaturatorAudioProcessor>());
-    moduleNodes[(size_t) moduleAutotune]   = graph.addNode (std::make_unique<MentalsAutotuneAudioProcessor>());
-    moduleNodes[(size_t) moduleDelay]      = graph.addNode (std::make_unique<MentalsDelayAudioProcessor>());
-    moduleNodes[(size_t) moduleReverb]     = graph.addNode (std::make_unique<MentalsReverbAudioProcessor>());
-
     audioInputNode  = graph.addNode (std::make_unique<juce::AudioProcessorGraph::AudioGraphIOProcessor> (
         juce::AudioProcessorGraph::AudioGraphIOProcessor::audioInputNode));
     audioOutputNode = graph.addNode (std::make_unique<juce::AudioProcessorGraph::AudioGraphIOProcessor> (
         juce::AudioProcessorGraph::AudioGraphIOProcessor::audioOutputNode));
     midiInputNode   = graph.addNode (std::make_unique<juce::AudioProcessorGraph::AudioGraphIOProcessor> (
         juce::AudioProcessorGraph::AudioGraphIOProcessor::midiInputNode));
-
-    // MIDI fan-out: only the EQ (MIDI Learn) and Autotune (MIDI Control) ever
-    // read incoming MIDI, and that doesn't depend on where they sit in the
-    // reorderable audio chain, so it's wired once here and left alone.
-    graph.addConnection ({ { midiInputNode->nodeID, juce::AudioProcessorGraph::midiChannelIndex },
-                            { moduleNodes[(size_t) moduleEQ]->nodeID, juce::AudioProcessorGraph::midiChannelIndex } });
-    graph.addConnection ({ { midiInputNode->nodeID, juce::AudioProcessorGraph::midiChannelIndex },
-                            { moduleNodes[(size_t) moduleAutotune]->nodeID, juce::AudioProcessorGraph::midiChannelIndex } });
 }
 
 void MentalsSuiteAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
@@ -69,45 +68,76 @@ juce::AudioProcessorEditor* MentalsSuiteAudioProcessor::createEditor()
     return new MentalsSuiteAudioProcessorEditor (*this);
 }
 
-juce::AudioProcessor* MentalsSuiteAudioProcessor::getModuleProcessor (int moduleId) const noexcept
+std::vector<MentalsSuiteAudioProcessor::ChainSlot> MentalsSuiteAudioProcessor::getChainSlots() const
 {
-    return moduleNodes[(size_t) moduleId]->getProcessor();
+    std::vector<ChainSlot> result;
+    result.reserve (slots.size());
+    for (auto& slot : slots)
+        result.push_back ({ slot.slotId, slot.moduleType });
+    return result;
 }
 
-void MentalsSuiteAudioProcessor::setChainOrder (const std::vector<int>& newOrder)
+MentalsSuiteAudioProcessor::Slot* MentalsSuiteAudioProcessor::findSlot (int slotId) noexcept
 {
-    chainOrder = newOrder;
+    for (auto& slot : slots)
+        if (slot.slotId == slotId)
+            return &slot;
+    return nullptr;
+}
+
+juce::AudioProcessor* MentalsSuiteAudioProcessor::getSlotProcessor (int slotId) const noexcept
+{
+    for (auto& slot : slots)
+        if (slot.slotId == slotId)
+            return slot.node->getProcessor();
+    return nullptr;
+}
+
+void MentalsSuiteAudioProcessor::setChainOrder (const std::vector<int>& newSlotOrder)
+{
+    std::vector<Slot> reordered;
+    reordered.reserve (newSlotOrder.size());
+    for (int slotId : newSlotOrder)
+        if (auto* slot = findSlot (slotId))
+            reordered.push_back (*slot);
+
+    slots = std::move (reordered);
     rebuildConnections();
 }
 
-bool MentalsSuiteAudioProcessor::isModuleInChain (int moduleId) const noexcept
+int MentalsSuiteAudioProcessor::addModuleToChain (int moduleType)
 {
-    return std::find (chainOrder.begin(), chainOrder.end(), moduleId) != chainOrder.end();
+    auto node = graph.addNode (createModuleProcessor (moduleType));
+    const int slotId = nextSlotId++;
+    slots.push_back ({ slotId, moduleType, node });
+    rebuildConnections();
+    return slotId;
 }
 
-void MentalsSuiteAudioProcessor::addModuleToChain (int moduleId)
+void MentalsSuiteAudioProcessor::removeModuleFromChain (int slotId)
 {
-    if (isModuleInChain (moduleId))
+    auto it = std::find_if (slots.begin(), slots.end(), [slotId] (const Slot& s) { return s.slotId == slotId; });
+    if (it == slots.end())
         return;
 
-    chainOrder.push_back (moduleId);
+    graph.removeNode (it->node->nodeID);
+    slots.erase (it);
     rebuildConnections();
 }
 
-void MentalsSuiteAudioProcessor::removeModuleFromChain (int moduleId)
+bool MentalsSuiteAudioProcessor::isSlotBypassed (int slotId) const noexcept
 {
-    chainOrder.erase (std::remove (chainOrder.begin(), chainOrder.end(), moduleId), chainOrder.end());
-    rebuildConnections();
+    for (auto& slot : slots)
+        if (slot.slotId == slotId)
+            return slot.node->isBypassed();
+    return false;
 }
 
-bool MentalsSuiteAudioProcessor::isModuleBypassed (int moduleId) const noexcept
+void MentalsSuiteAudioProcessor::setSlotBypassed (int slotId, bool shouldBeBypassed)
 {
-    return moduleNodes[(size_t) moduleId]->isBypassed();
-}
-
-void MentalsSuiteAudioProcessor::setModuleBypassed (int moduleId, bool shouldBeBypassed)
-{
-    moduleNodes[(size_t) moduleId]->setBypassed (shouldBeBypassed);
+    for (auto& slot : slots)
+        if (slot.slotId == slotId)
+            slot.node->setBypassed (shouldBeBypassed);
 }
 
 void MentalsSuiteAudioProcessor::rebuildConnections()
@@ -117,14 +147,13 @@ void MentalsSuiteAudioProcessor::rebuildConnections()
     // JUCE hosts hold around calling processBlock().
     const juce::ScopedLock sl (getCallbackLock());
 
-    // Clear only the AUDIO connections (channelIndex != midiChannelIndex);
-    // the fixed MIDI fan-out set up in the constructor is left alone. Copy
-    // the connection list first since removeConnection() mutates the same
-    // list this would otherwise be iterating.
+    // Clear every existing connection (audio AND MIDI) and rebuild both from
+    // scratch below -- simpler than trying to patch around whichever slots
+    // changed, and cheap enough given how rarely this runs (only on
+    // add/remove/reorder, never per-block).
     const auto existingConnections = graph.getConnections();
     for (const auto& connection : existingConnections)
-        if (connection.source.channelIndex != juce::AudioProcessorGraph::midiChannelIndex)
-            graph.removeConnection (connection);
+        graph.removeConnection (connection);
 
     auto connectStereo = [this] (juce::AudioProcessorGraph::NodeID from, juce::AudioProcessorGraph::NodeID to)
     {
@@ -133,19 +162,28 @@ void MentalsSuiteAudioProcessor::rebuildConnections()
     };
 
     auto previous = audioInputNode->nodeID;
-    for (int moduleId : chainOrder)
+    for (auto& slot : slots)
     {
-        connectStereo (previous, moduleNodes[(size_t) moduleId]->nodeID);
-        previous = moduleNodes[(size_t) moduleId]->nodeID;
+        connectStereo (previous, slot.node->nodeID);
+        previous = slot.node->nodeID;
     }
     connectStereo (previous, audioOutputNode->nodeID);
+
+    // MIDI fan-out: every currently-present EQ (MIDI Learn) or Autotune
+    // (MIDI Control) instance reads incoming MIDI directly, regardless of
+    // its position in the audio chain -- recomputed here since which slots
+    // exist can change at any time now that instances can be added/removed.
+    for (auto& slot : slots)
+        if (slot.moduleType == moduleEQ || slot.moduleType == moduleAutotune)
+            graph.addConnection ({ { midiInputNode->nodeID, juce::AudioProcessorGraph::midiChannelIndex },
+                                    { slot.node->nodeID, juce::AudioProcessorGraph::midiChannelIndex } });
 
     // The graph handles latency-compensation delay lines internally based on
     // each node's own reported latency (Multimode EQ's Natural Phase mode
     // and Autotune's Formant Preservation both report latency only when
     // that toggle is on); the total is only re-read here, at topology-change
     // time, not continuously -- toggling one of those live mid-playback
-    // without also changing the chain order won't retrigger this.
+    // without also changing the chain doesn't retrigger this.
     setLatencySamples (graph.getLatencySamples());
 }
 
@@ -153,22 +191,17 @@ void MentalsSuiteAudioProcessor::getStateInformation (juce::MemoryBlock& destDat
 {
     juce::ValueTree state ("MentalsSuiteState");
 
-    juce::Array<juce::var> orderArray;
-    for (int moduleId : chainOrder)
-        orderArray.add (moduleId);
-    state.setProperty ("chainOrder", orderArray, nullptr);
-
-    for (int moduleId = 0; moduleId < (int) numModules; ++moduleId)
+    for (auto& slot : slots)
     {
-        juce::ValueTree moduleState ("Module");
-        moduleState.setProperty ("id", moduleId, nullptr);
-        moduleState.setProperty ("bypassed", isModuleBypassed (moduleId), nullptr);
+        juce::ValueTree slotState ("Slot");
+        slotState.setProperty ("moduleType", slot.moduleType, nullptr);
+        slotState.setProperty ("bypassed", slot.node->isBypassed(), nullptr);
 
         juce::MemoryBlock innerBlock;
-        getModuleProcessor (moduleId)->getStateInformation (innerBlock);
-        moduleState.setProperty ("state", innerBlock.toBase64Encoding(), nullptr);
+        slot.node->getProcessor()->getStateInformation (innerBlock);
+        slotState.setProperty ("state", innerBlock.toBase64Encoding(), nullptr);
 
-        state.appendChild (moduleState, nullptr);
+        state.appendChild (slotState, nullptr);
     }
 
     if (auto xml = state.createXml())
@@ -185,27 +218,28 @@ void MentalsSuiteAudioProcessor::setStateInformation (const void* data, int size
     if (! state.isValid())
         return;
 
-    std::vector<int> newOrder;
-    const auto orderVar = state.getProperty ("chainOrder");
-    if (orderVar.isArray())
-        for (const auto& moduleIdVar : *orderVar.getArray())
-            newOrder.push_back ((int) moduleIdVar);
+    for (auto& slot : slots)
+        graph.removeNode (slot.node->nodeID);
+    slots.clear();
 
-    for (const auto& moduleState : state)
+    for (const auto& slotState : state)
     {
-        const int moduleId = moduleState.getProperty ("id", -1);
-        if (moduleId < 0 || moduleId >= (int) numModules)
+        const int moduleType = slotState.getProperty ("moduleType", -1);
+        if (moduleType < 0 || moduleType >= (int) numModuleTypes)
             continue;
 
-        setModuleBypassed (moduleId, moduleState.getProperty ("bypassed", false));
+        auto node = graph.addNode (createModuleProcessor (moduleType));
+        node->setBypassed (slotState.getProperty ("bypassed", false));
 
         juce::MemoryBlock innerBlock;
-        innerBlock.fromBase64Encoding (moduleState.getProperty ("state").toString());
+        innerBlock.fromBase64Encoding (slotState.getProperty ("state").toString());
         if (innerBlock.getSize() > 0)
-            getModuleProcessor (moduleId)->setStateInformation (innerBlock.getData(), (int) innerBlock.getSize());
+            node->getProcessor()->setStateInformation (innerBlock.getData(), (int) innerBlock.getSize());
+
+        slots.push_back ({ nextSlotId++, moduleType, node });
     }
 
-    setChainOrder (newOrder);
+    rebuildConnections();
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

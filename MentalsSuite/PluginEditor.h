@@ -3,25 +3,27 @@
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
 #include "MentalsUI.h"
-#include <array>
+#include <map>
 #include <memory>
 #include <vector>
 
 //==============================================================================
-// One row in the chain list, shown only while its module is actually in the
-// chain: name, a Bypass toggle (stays in the chain but passes through
-// unprocessed), and a Remove button (takes it out of the chain entirely --
-// see ChainListComponent's "+ Add" button for putting it back). Acts as a
-// tab selector (click to view that module) and a drag handle (drag to move
-// it earlier/later in the signal chain). A row's ModuleId never changes --
-// only its on-screen position/visibility does.
+// One row in the chain list, one per instance currently in the chain
+// (several rows can show the same module type, e.g. "EQ 1"/"EQ 2"): its
+// display name, a Bypass toggle (stays in the chain but passes through
+// unprocessed), and a Remove button (takes it out of the chain and destroys
+// it for good -- see ChainListComponent's "+ Add" button for adding a fresh
+// instance of any type back in). Acts as a tab selector (click to view that
+// instance) and a drag handle (drag to move it earlier/later in the signal
+// chain). A row's slotId never changes -- only its on-screen position does,
+// as the chain is reordered.
 //==============================================================================
 class ChainListComponent;
 
 class ChainRowComponent : public juce::Component
 {
 public:
-    ChainRowComponent (ChainListComponent& ownerIn, MentalsSuiteAudioProcessor& processorIn, int moduleIdIn);
+    ChainRowComponent (ChainListComponent& ownerIn, MentalsSuiteAudioProcessor& processorIn, int slotIdIn, int moduleTypeIn);
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -29,12 +31,16 @@ public:
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
 
-    int moduleId;
+    void setDisplayName (const juce::String& name) { displayName = name; repaint(); }
+
+    int slotId;
+    int moduleType;
     bool isSelected = false;
 
 private:
     ChainListComponent& owner;
     MentalsSuiteAudioProcessor& processor;
+    juce::String displayName;
     juce::ToggleButton bypassButton { "Bypass" };
     juce::TextButton removeButton { "Remove" };
     int dragStartMouseY = 0, dragStartComponentY = 0;
@@ -44,12 +50,13 @@ private:
 };
 
 //==============================================================================
-// Vertical list of the modules currently IN the chain (a subset of all seven,
-// possibly empty), laid out in the processor's current chain order, plus an
-// "+ Add Module" button that opens a menu of whichever modules aren't in the
-// chain yet. Dragging a row past a neighbour reorders the underlying chain
-// live (see MentalsSuiteAudioProcessor::setChainOrder()); clicking one
-// without dragging selects it for viewing.
+// Vertical list of rows, one per instance currently in the chain (possibly
+// none, possibly several of the same module type), laid out in the
+// processor's current chain order, plus an "+ Add Module" button that opens
+// a menu of all seven module types -- always all seven, since any of them
+// can be added more than once. Dragging a row past a neighbour reorders the
+// underlying chain live (see MentalsSuiteAudioProcessor::setChainOrder());
+// clicking one without dragging selects it for viewing.
 //==============================================================================
 class ChainListComponent : public juce::Component
 {
@@ -58,31 +65,36 @@ public:
 
     void resized() override;
 
-    // Called by a row on drag/click -- moduleId identifies which row.
-    void rowDragged (int moduleId, int newScreenY);
+    // Called by a row on drag/click -- slotId identifies which row.
+    void rowDragged (int slotId, int newScreenY);
     void rowDragEnded();
-    void rowClicked (int moduleId);
-    void rowRemoveRequested (int moduleId);
+    void rowClicked (int slotId);
+    void rowRemoveRequested (int slotId);
 
     // Re-reads the processor's current chain membership/order (e.g. after
-    // loading saved state) and refreshes which rows are shown.
+    // an add/remove, or after loading saved state) and rebuilds the rows.
+    // NOT called mid-drag -- dragging only reorders the existing rows.
     void refreshFromProcessor();
 
-    // Called with the module that should now be shown, or -1 if the chain
-    // is now empty (e.g. the module being viewed was just removed).
+    // Called with the slot that should now be shown, or -1 if the chain is
+    // now empty. Actually removing a slot's processor/editor is the outer
+    // editor's job (see onModuleRemoveRequested), not this component's --
+    // it owns the editor cache that must be torn down in the right order.
     std::function<void (int)> onModuleSelected;
-    int selectedModuleId = -1;
+    std::function<void (int)> onModuleRemoveRequested;
+    int selectedSlotId = -1;
 
     static constexpr int rowHeight = 56;
     static constexpr int addButtonHeight = 32;
 
 private:
-    void layoutRows (int excludeModuleId = -1);
+    void layoutRows (int excludeSlotId = -1);
     void showAddMenu();
+    void updateDisplayNames();
 
     MentalsSuiteAudioProcessor& processor;
-    std::array<std::unique_ptr<ChainRowComponent>, (size_t) MentalsSuiteAudioProcessor::numModules> rows;
-    std::vector<int> visualOrder; // the modules currently in the chain, in order
+    std::vector<std::unique_ptr<ChainRowComponent>> rows; // parallel to visualOrder
+    std::vector<int> visualOrder; // slot IDs, in chain order
     juce::TextButton addButton { "+ Add Module" };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChainListComponent)
@@ -90,10 +102,10 @@ private:
 
 //==============================================================================
 // Mentals Suite's editor: the chain list on the left (add/remove/reorder/
-// bypass/select), and the currently-selected module's own, unmodified editor
-// filling the rest of the window -- each module's UI is exactly what its
-// standalone plugin shows, just hosted here instead. Shows a placeholder
-// message when the chain is empty (nothing added yet).
+// bypass/select), and the currently-selected instance's own, unmodified
+// editor filling the rest of the window -- each module's UI is exactly what
+// its standalone plugin shows, just hosted here instead. Shows a
+// placeholder message when the chain is empty (nothing added yet).
 //==============================================================================
 class MentalsSuiteAudioProcessorEditor : public juce::AudioProcessorEditor
 {
@@ -105,7 +117,8 @@ public:
     void resized() override;
 
 private:
-    void showModule (int moduleId);
+    void showModule (int slotId);
+    void removeModule (int slotId);
     void parentHierarchyChanged() override { MentalsUI::enableMaximiseButtonIfStandalone (*this); }
 
     MentalsSuiteAudioProcessor& processor;
@@ -115,8 +128,10 @@ private:
     juce::Viewport moduleViewport;
     juce::Label emptyStateLabel { {}, "No plugins in the chain yet -- click \"+ Add Module\" to begin." };
 
-    std::array<std::unique_ptr<juce::AudioProcessorEditor>, (size_t) MentalsSuiteAudioProcessor::numModules> moduleEditors;
-    int currentlyShownModuleId = -1;
+    // Keyed by slotId rather than module type, since several instances of
+    // the same type can now coexist, each with its own independent editor.
+    std::map<int, std::unique_ptr<juce::AudioProcessorEditor>> moduleEditors;
+    int currentlyShownSlotId = -1;
 
     static constexpr int chainListWidth = 220;
     static constexpr int topBarHeight = 40;
