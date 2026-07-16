@@ -29,3 +29,4 @@ add_subdirectory(Shared/MentalsUI)
 # ----------------------------------------------------------------------------
 add_subdirectory(MentalsMultimodeEQ)
 add_subdirectory(MentalsDelay)
+add_subdirectory(MentalsReverb)
