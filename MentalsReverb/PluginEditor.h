@@ -50,6 +50,7 @@ public:
 private:
     void buttonClicked (juce::Button*) override;
     void comboBoxChanged (juce::ComboBox*) override;
+    void parentHierarchyChanged() override { MentalsUI::enableMaximiseButtonIfStandalone (*this); }
     void refreshPresetList();
     void promptToSavePreset();
 

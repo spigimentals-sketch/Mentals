@@ -8,3 +8,4 @@
 #include "LabelledSlider.h"
 #include "PopupLauncher.h"
 #include "PresetManager.h"
+#include "WindowHelpers.h"
