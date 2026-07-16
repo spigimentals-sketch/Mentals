@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include "MentalsUI.h"
 #include "PitchDSP.h"
+#include <algorithm>
 #include <array>
 #include <vector>
 
@@ -19,6 +20,11 @@
 // mechanism serving what would otherwise be three separate asks ("dynamic
 // pitch tracking for sustained notes vs. fast runs", "emotion-aware tuning",
 // and "adaptive retune speed").
+//
+// The correction target comes from one of three sources, in priority order:
+// a held MIDI note (MIDI Control), the sidechain bus's own detected pitch
+// (Sidechain Tuning), or ordinary scale-snapping -- see
+// runPitchDetectionAndUpdateTarget()'s comment for exactly how they combine.
 //==============================================================================
 class MentalsAutotuneAudioProcessor : public juce::AudioProcessor
 {
@@ -35,7 +41,7 @@ public:
     bool hasEditor() const override { return true; }
 
     const juce::String getName() const override { return JucePlugin_Name; }
-    bool acceptsMidi() const override { return false; }
+    bool acceptsMidi() const override { return true; } // MIDI Control mode: a held note can drive the correction target
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 0.0; }
@@ -75,12 +81,22 @@ public:
     juce::AudioParameterFloat*  mixParam               = nullptr;
     juce::AudioParameterBool*   formantPreservationParam = nullptr;
     juce::AudioParameterBool*   adaptiveRetuneParam      = nullptr;
+    juce::AudioParameterBool*   midiControlParam         = nullptr;
+    juce::AudioParameterBool*   sidechainTuningParam     = nullptr;
+    juce::AudioParameterBool*   lowLatencyModeParam      = nullptr;
 
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     void updateOutputLevelMeter (const juce::AudioBuffer<float>& buffer);
     void runPitchDetectionAndUpdateTarget();
     float computeStabilityScore() const noexcept;
+    void processIncomingMidi (juce::MidiBuffer& midi);
+
+    // Low-Latency Mode shrinks the main detector's analysis window/hop for
+    // faster reaction at the cost of reduced low-frequency accuracy. Checked
+    // once per block; reallocates the (tiny) analysis buffers only on the
+    // rare occasion the toggle actually changes, not continuously.
+    void reconfigureAnalysisWindowIfNeeded();
 
     // Writes out the built-in Natural/Robotic/Trap/Choral style presets the
     // first time this plugin runs (skipping any name the user has already
@@ -94,6 +110,10 @@ private:
     static constexpr float maxDetectableFreqHz = 1200.0f;
     static constexpr float voicedConfidenceThreshold = 0.45f;
     static constexpr int maxSupportedChannels = 8;
+
+    static constexpr double normalWindowSeconds     = 0.046;
+    static constexpr double lowLatencyWindowSeconds = 0.012;
+    bool lastLowLatencyModeApplied = false; // forces a reconfigure on the first block
 
     int windowSizeSamples = 2048;
     int hopSizeSamples    = 1024;
@@ -130,6 +150,16 @@ private:
     std::array<float, stabilityHistoryLength> stabilityHistory {};
     int stabilityHistoryCount = 0;
     int stabilityHistoryPos = 0;
+
+    // MIDI Control: notes currently held, most-recently-pressed last (used
+    // as the correction target with top priority over Sidechain Tuning and
+    // ordinary scale-snapping whenever at least one note is held).
+    std::vector<int> heldMidiNotes;
+
+    // Sidechain Tuning: a second, independent pitch detector analysing the
+    // optional sidechain bus, whose detected pitch becomes the correction
+    // target (second priority, below MIDI Control) whenever it's confident.
+    PitchDSP::StreamingPitchDetector sidechainDetector;
 
     std::atomic<float> lastDetectedFreqHz { 0.0f };
     std::atomic<float> lastTargetFreqHz   { 0.0f };

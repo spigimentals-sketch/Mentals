@@ -61,16 +61,23 @@ private:
     void parentHierarchyChanged() override { MentalsUI::enableMaximiseButtonIfStandalone (*this); }
     void refreshPresetList();
     void promptToSavePreset();
+    void showSettingsPanel();
+    void layoutSettingsPanelContent();
 
     MentalsAutotuneAudioProcessor& processor;
 
     //==========================================================================
-    // Top bar: shared MENTALS wordmark + product name, preset select/save.
+    // Top bar: shared MENTALS wordmark + product name, preset select/save,
+    // Settings (opens a popup -- see showSettingsPanel()) holding every
+    // toggle-style mode/behaviour, keeping the main panel focused on the
+    // controls used every session (Key/Scale/Retune Speed/Amount/Mix).
     //==========================================================================
     juce::ImageComponent logoImage;
     juce::Label productNameLabel;
     juce::ComboBox presetSelector;
     juce::TextButton presetSaveButton { "Save" };
+    juce::TextButton settingsButton { "Settings" };
+    juce::Component settingsPanelContent;
 
     PitchHistoryComponent pitchHistory;
     MentalsUI::SplitterBar splitter;
@@ -82,23 +89,29 @@ private:
     juce::ComboBox keySelector, scaleSelector;
     MentalsUI::LabelledSlider retuneSpeedSlider, amountSlider, mixSlider;
 
-    // Manual overrides for both of Phase 1's automatic/adaptive behaviours --
-    // formant preservation is deterministic DSP rather than "AI-driven", but
-    // still gets its own bypass since it changes latency; Adaptive Retune
-    // is the one behaviour here that reacts to the input rather than just
-    // to a knob, so per the "manual override for all AI-driven features"
-    // request, it must be fully disable-able.
-    juce::ToggleButton formantPreservationToggle { "Formant Preservation" };
-    juce::ToggleButton adaptiveRetuneToggle { "Adaptive Retune" };
-
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> keyAttachment, scaleAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
         retuneSpeedAttachment, amountAttachment, mixAttachment;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>
-        formantPreservationAttachment, adaptiveRetuneAttachment;
 
     juce::Label outputMeterLabel;
     MentalsUI::LevelMeterComponent outputMeter;
+
+    //==========================================================================
+    // Settings popup content: every toggle-style mode/behaviour, all with
+    // their own manual override per the "manual override for all AI-driven
+    // features" request (formant preservation is deterministic DSP rather
+    // than "AI-driven", but still gets a bypass since it changes latency).
+    // Children of settingsPanelContent, not of the editor directly.
+    //==========================================================================
+    juce::ToggleButton formantPreservationToggle { "Formant Preservation" };
+    juce::ToggleButton adaptiveRetuneToggle { "Adaptive Retune" };
+    juce::ToggleButton midiControlToggle { "MIDI Control" };
+    juce::ToggleButton sidechainTuningToggle { "Sidechain Tuning" };
+    juce::ToggleButton lowLatencyModeToggle { "Low-Latency Mode" };
+
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>
+        formantPreservationAttachment, adaptiveRetuneAttachment,
+        midiControlAttachment, sidechainTuningAttachment, lowLatencyModeAttachment;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MentalsAutotuneAudioProcessorEditor)
 };

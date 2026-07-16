@@ -4,8 +4,9 @@
 //==============================================================================
 MentalsAutotuneAudioProcessor::MentalsAutotuneAudioProcessor()
     : AudioProcessor (BusesProperties()
-                           .withInput  ("Input",  juce::AudioChannelSet::stereo(), true)
-                           .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
+                           .withInput  ("Input",     juce::AudioChannelSet::stereo(), true)
+                           .withInput  ("Sidechain", juce::AudioChannelSet::stereo(), false)
+                           .withOutput ("Output",    juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "PARAMETERS", createParameterLayout())
 {
     keyParam                 = dynamic_cast<juce::AudioParameterChoice*> (apvts.getParameter ("key"));
@@ -15,6 +16,9 @@ MentalsAutotuneAudioProcessor::MentalsAutotuneAudioProcessor()
     mixParam                 = dynamic_cast<juce::AudioParameterFloat*>  (apvts.getParameter ("mix"));
     formantPreservationParam = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("formantPreservation"));
     adaptiveRetuneParam      = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("adaptiveRetune"));
+    midiControlParam         = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("midiControl"));
+    sidechainTuningParam     = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("sidechainTuning"));
+    lowLatencyModeParam      = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("lowLatencyMode"));
 
     ensureFactoryPresetsExist();
 }
@@ -107,6 +111,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout MentalsAutotuneAudioProcesso
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "adaptiveRetune", "Adaptive Retune", true));
 
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "midiControl", "MIDI Control", false));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "sidechainTuning", "Sidechain Tuning", false));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "lowLatencyMode", "Low-Latency Mode", false));
+
     return { params.begin(), params.end() };
 }
 
@@ -116,13 +129,14 @@ void MentalsAutotuneAudioProcessor::prepareToPlay (double sampleRate, int sample
     juce::ignoreUnused (samplesPerBlock);
     currentSampleRate = sampleRate;
 
-    windowSizeSamples = juce::jmax (256, (int) (0.046 * sampleRate));
-    hopSizeSamples    = juce::jmax (128, windowSizeSamples / 2);
+    // Force reconfigureAnalysisWindowIfNeeded() to (re)size the main
+    // detector's buffers for the current sample rate and Low-Latency Mode
+    // setting right now, rather than waiting for the first block.
+    lastLowLatencyModeApplied = ! lowLatencyModeParam->get();
+    reconfigureAnalysisWindowIfNeeded();
 
-    analysisRingBuffer.assign ((size_t) windowSizeSamples, 0.0f);
-    analysisWorkspace.assign ((size_t) windowSizeSamples, 0.0f);
-    analysisWritePos = 0;
-    samplesUntilNextHop = hopSizeSamples;
+    sidechainDetector.prepare (sampleRate, normalWindowSeconds);
+    heldMidiNotes.clear();
 
     targetRatio   = 1.0f;
     smoothedRatio = 1.0f;
@@ -156,6 +170,24 @@ void MentalsAutotuneAudioProcessor::prepareToPlay (double sampleRate, int sample
     lastReportedLatencySamples = -1; // force processBlock to (re)announce it on the first block
 }
 
+void MentalsAutotuneAudioProcessor::reconfigureAnalysisWindowIfNeeded()
+{
+    const bool lowLatencyNow = lowLatencyModeParam->get();
+    if (lowLatencyNow == lastLowLatencyModeApplied)
+        return;
+
+    lastLowLatencyModeApplied = lowLatencyNow;
+
+    const double windowSeconds = lowLatencyNow ? lowLatencyWindowSeconds : normalWindowSeconds;
+    windowSizeSamples = juce::jmax (256, (int) (windowSeconds * currentSampleRate));
+    hopSizeSamples    = juce::jmax (128, windowSizeSamples / 2);
+
+    analysisRingBuffer.assign ((size_t) windowSizeSamples, 0.0f);
+    analysisWorkspace.assign ((size_t) windowSizeSamples, 0.0f);
+    analysisWritePos = 0;
+    samplesUntilNextHop = hopSizeSamples;
+}
+
 bool MentalsAutotuneAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
     const auto& mainOut = layouts.getMainOutputChannelSet();
@@ -164,7 +196,38 @@ bool MentalsAutotuneAudioProcessor::isBusesLayoutSupported (const BusesLayout& l
     if (mainOut != mainIn || mainOut.isDisabled())
         return false;
 
+    if (layouts.inputBuses.size() > 1)
+    {
+        const auto& sidechain = layouts.getChannelSet (true, 1);
+        if (! sidechain.isDisabled() && sidechain != juce::AudioChannelSet::stereo())
+            return false;
+    }
+
     return mainOut.size() >= 1 && mainOut.size() <= maxSupportedChannels;
+}
+
+void MentalsAutotuneAudioProcessor::processIncomingMidi (juce::MidiBuffer& midi)
+{
+    for (const auto metadata : midi)
+    {
+        const auto message = metadata.getMessage();
+
+        if (message.isNoteOn())
+        {
+            const int note = message.getNoteNumber();
+            // Re-pressing an already-held note (unlikely, but a host could
+            // send a duplicate) shouldn't create a duplicate stack entry.
+            heldMidiNotes.erase (std::remove (heldMidiNotes.begin(), heldMidiNotes.end(), note), heldMidiNotes.end());
+            heldMidiNotes.push_back (note);
+        }
+        else if (message.isNoteOff())
+        {
+            const int note = message.getNoteNumber();
+            heldMidiNotes.erase (std::remove (heldMidiNotes.begin(), heldMidiNotes.end(), note), heldMidiNotes.end());
+        }
+    }
+
+    midi.clear(); // not a MIDI effect -- inspected for note tracking only, not passed through
 }
 
 void MentalsAutotuneAudioProcessor::runPitchDetectionAndUpdateTarget()
@@ -182,17 +245,59 @@ void MentalsAutotuneAudioProcessor::runPitchDetectionAndUpdateTarget()
     float detectedFreqHz = 0.0f, confidence = 0.0f;
     const bool found = PitchDSP::detectPitch (analysisWorkspace.data(), windowSizeSamples, currentSampleRate,
                                                minDetectableFreqHz, maxDetectableFreqHz, detectedFreqHz, confidence);
+    const bool voicedNow = found && confidence >= voicedConfidenceThreshold;
 
-    if (found && confidence >= voicedConfidenceThreshold)
+    if (voicedNow)
     {
-        // Map the detected frequency to the nearest scale degree in the
-        // selected Key/Scale, working in cents (not semitones) so
-        // microtonal scales -- whose degrees don't all land on integer
-        // semitones -- are represented exactly, not just approximated to
-        // the nearest 12-TET semitone. Cent distances are measured from
-        // A4 = 440Hz, then re-based so the key's root note sits at an
-        // exact multiple of 1200 cents before searching for the nearest
-        // scale degree.
+        lastDetectedFreqHz.store (detectedFreqHz);
+        lastIsVoiced.store (true);
+
+        // Feed Adaptive Retune's stability tracker -- one push per
+        // detection cycle (not per sample), in semitones (not cents) since
+        // that's the unit computeStabilityScore()'s threshold uses.
+        const float centsFromA4 = 1200.0f * std::log2 (detectedFreqHz / 440.0f);
+        stabilityHistory[(size_t) stabilityHistoryPos] = centsFromA4 / 100.0f;
+        stabilityHistoryPos = (stabilityHistoryPos + 1) % stabilityHistoryLength;
+        stabilityHistoryCount = juce::jmin (stabilityHistoryCount + 1, stabilityHistoryLength);
+    }
+    else
+    {
+        lastIsVoiced.store (false);
+        stabilityHistoryCount = 0; // a gap in voicing resets the stability read, rather than bridging across silence
+    }
+
+    // The frequency to correct FROM: the input's own detected pitch right
+    // now, or (during a brief unvoiced gap, e.g. a consonant) the last
+    // known-good one, so MIDI Control/Sidechain Tuning can still produce a
+    // sensible ratio instead of momentarily doing nothing.
+    const float referenceFreqHz = voicedNow ? detectedFreqHz : lastDetectedFreqHz.load();
+
+    float targetFreqHz = 0.0f;
+    bool haveTarget = false;
+
+    if (midiControlParam->get() && ! heldMidiNotes.empty() && referenceFreqHz > 0.0f)
+    {
+        // Highest priority: a live-held MIDI note drives the target
+        // directly, bypassing scale-snapping entirely.
+        targetFreqHz = PitchDSP::midiNoteToFrequencyHz (heldMidiNotes.back());
+        haveTarget = true;
+    }
+    else if (sidechainTuningParam->get() && sidechainDetector.isLastVoiced() && referenceFreqHz > 0.0f)
+    {
+        // Second priority: match whatever pitch the sidechain bus is
+        // currently singing/playing.
+        targetFreqHz = sidechainDetector.getLastFreqHz();
+        haveTarget = true;
+    }
+    else if (voicedNow)
+    {
+        // Ordinary scale-snapping: map the detected frequency to the
+        // nearest scale degree in the selected Key/Scale, working in cents
+        // (not semitones) so microtonal scales -- whose degrees don't all
+        // land on integer semitones -- are represented exactly. Cent
+        // distances are measured from A4 = 440Hz, then re-based so the
+        // key's root note sits at an exact multiple of 1200 cents before
+        // searching for the nearest scale degree.
         const float centsFromA4 = 1200.0f * std::log2 (detectedFreqHz / 440.0f);
         const int   keyIndex = keyParam->getIndex(); // 0=C..11=B
         const float rootOffsetFromA = (float) (keyIndex - 9) * 100.0f; // A is index 9
@@ -202,28 +307,21 @@ void MentalsAutotuneAudioProcessor::runPitchDetectionAndUpdateTarget()
         const auto& scale  = scales[(size_t) juce::jlimit (0, (int) scales.size() - 1, scaleParam->getIndex())];
         const float nearestFromRoot = PitchDSP::nearestScaleCents (centsFromRoot, scale.centsFromRoot);
         const float nearestFromA4   = nearestFromRoot + rootOffsetFromA;
-        const float targetFreqHz    = 440.0f * std::pow (2.0f, nearestFromA4 / 1200.0f);
 
-        const float rawRatio = targetFreqHz / detectedFreqHz;
+        targetFreqHz = 440.0f * std::pow (2.0f, nearestFromA4 / 1200.0f);
+        haveTarget = true;
+    }
+
+    if (haveTarget)
+    {
+        const float rawRatio = targetFreqHz / referenceFreqHz;
         const float amount   = juce::jlimit (0.0f, 1.0f, amountParam->get() * 0.01f);
         targetRatio = 1.0f + (rawRatio - 1.0f) * amount;
-
-        lastDetectedFreqHz.store (detectedFreqHz);
         lastTargetFreqHz.store (targetFreqHz);
-        lastIsVoiced.store (true);
-
-        // Feed Adaptive Retune's stability tracker -- one push per
-        // detection cycle (not per sample). Kept in semitones (not cents)
-        // since that's the unit computeStabilityScore()'s threshold uses.
-        stabilityHistory[(size_t) stabilityHistoryPos] = centsFromA4 / 100.0f;
-        stabilityHistoryPos = (stabilityHistoryPos + 1) % stabilityHistoryLength;
-        stabilityHistoryCount = juce::jmin (stabilityHistoryCount + 1, stabilityHistoryLength);
     }
     else
     {
-        targetRatio = 1.0f; // no confident pitch (silence/unvoiced/noise) -- pass through unshifted
-        lastIsVoiced.store (false);
-        stabilityHistoryCount = 0; // a gap in voicing resets the stability read, rather than bridging across silence
+        targetRatio = 1.0f; // no confident pitch and no override active -- pass through unshifted
     }
 }
 
@@ -258,10 +356,15 @@ float MentalsAutotuneAudioProcessor::computeStabilityScore() const noexcept
 void MentalsAutotuneAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
-    midi.clear(); // not a MIDI effect
+    processIncomingMidi (midi);
+    reconfigureAnalysisWindowIfNeeded();
 
-    const int numChannels = juce::jmin (buffer.getNumChannels(), maxSupportedChannels);
-    const int numSamples  = buffer.getNumSamples();
+    auto mainBuffer = getBusBuffer (buffer, true, 0);
+    auto sidechainBuffer = getBusCount (true) > 1 ? getBusBuffer (buffer, true, 1) : juce::AudioBuffer<float>();
+    const bool sidechainTuningOn = sidechainTuningParam->get() && sidechainBuffer.getNumChannels() > 0;
+
+    const int numChannels = juce::jmin (mainBuffer.getNumChannels(), maxSupportedChannels);
+    const int numSamples  = mainBuffer.getNumSamples();
 
     const float mix = juce::jlimit (0.0f, 1.0f, mixParam->get() * 0.01f);
     const bool formantPreservationOn = formantPreservationParam->get();
@@ -280,11 +383,20 @@ void MentalsAutotuneAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     {
         float monoSum = 0.0f;
         for (int ch = 0; ch < numChannels; ++ch)
-            monoSum += buffer.getReadPointer (ch)[n];
+            monoSum += mainBuffer.getReadPointer (ch)[n];
         const float mono = numChannels > 0 ? monoSum / (float) numChannels : 0.0f;
 
         analysisRingBuffer[(size_t) analysisWritePos] = mono;
         analysisWritePos = (analysisWritePos + 1) % windowSizeSamples;
+
+        if (sidechainTuningOn)
+        {
+            float sidechainSum = 0.0f;
+            for (int ch = 0; ch < sidechainBuffer.getNumChannels(); ++ch)
+                sidechainSum += sidechainBuffer.getReadPointer (ch)[n];
+            const float sidechainMono = sidechainSum / (float) sidechainBuffer.getNumChannels();
+            sidechainDetector.pushSample (sidechainMono, minDetectableFreqHz, maxDetectableFreqHz, voicedConfidenceThreshold);
+        }
 
         if (--samplesUntilNextHop <= 0)
         {
@@ -310,7 +422,7 @@ void MentalsAutotuneAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
 
         for (int ch = 0; ch < numChannels; ++ch)
         {
-            auto* data = buffer.getWritePointer (ch);
+            auto* data = mainBuffer.getWritePointer (ch);
             const float dry     = data[n];
             const float shifted = pitchShifters[(size_t) ch].process (dry, smoothedRatio);
 
@@ -338,7 +450,7 @@ void MentalsAutotuneAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
         }
     }
 
-    updateOutputLevelMeter (buffer);
+    updateOutputLevelMeter (mainBuffer);
 }
 
 void MentalsAutotuneAudioProcessor::updateOutputLevelMeter (const juce::AudioBuffer<float>& buffer)

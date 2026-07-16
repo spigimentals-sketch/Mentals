@@ -104,6 +104,77 @@ namespace PitchDSP
         return true;
     }
 
+    inline float midiNoteToFrequencyHz (int midiNote) noexcept
+    {
+        return 440.0f * std::pow (2.0f, (float) (midiNote - 69) / 12.0f);
+    }
+
+    //==========================================================================
+    // Self-contained streaming wrapper around detectPitch(): owns the ring
+    // buffer/hop counter/window so a second, independent detector (e.g. for
+    // Sidechain Tuning) can run alongside the main one without duplicating
+    // that bookkeeping. The main processor's own detector predates this
+    // class and isn't migrated onto it, to avoid touching already-verified,
+    // working code for a pure refactor with no behaviour change.
+    //==========================================================================
+    class StreamingPitchDetector
+    {
+    public:
+        void prepare (double sampleRateIn, double windowSeconds)
+        {
+            sampleRate = sampleRateIn;
+            windowSize = juce::jmax (256, (int) (windowSeconds * sampleRate));
+            hopSize    = juce::jmax (128, windowSize / 2);
+
+            ringBuffer.assign ((size_t) windowSize, 0.0f);
+            workspace.assign ((size_t) windowSize, 0.0f);
+            writePos = 0;
+            samplesUntilNextHop = hopSize;
+            lastFreqHz = 0.0f;
+            lastVoiced = false;
+        }
+
+        // Feeds one sample in; returns true if a new detection cycle just ran.
+        bool pushSample (float sample, float minFreqHz, float maxFreqHz, float confidenceThreshold) noexcept
+        {
+            ringBuffer[(size_t) writePos] = sample;
+            writePos = (writePos + 1) % windowSize;
+
+            if (--samplesUntilNextHop > 0)
+                return false;
+
+            samplesUntilNextHop = hopSize;
+
+            for (int i = 0; i < windowSize; ++i)
+            {
+                const int idx = (writePos + i) % windowSize;
+                const float window = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) (windowSize - 1));
+                workspace[(size_t) i] = ringBuffer[(size_t) idx] * window;
+            }
+
+            float freq = 0.0f, confidence = 0.0f;
+            const bool found = detectPitch (workspace.data(), windowSize, sampleRate, minFreqHz, maxFreqHz, freq, confidence);
+
+            lastVoiced = found && confidence >= confidenceThreshold;
+            if (lastVoiced)
+                lastFreqHz = freq;
+
+            return true;
+        }
+
+        float getLastFreqHz() const noexcept { return lastFreqHz; }
+        bool isLastVoiced() const noexcept { return lastVoiced; }
+
+    private:
+        double sampleRate = 44100.0;
+        int windowSize = 2048, hopSize = 1024;
+        std::vector<float> ringBuffer, workspace;
+        int writePos = 0;
+        int samplesUntilNextHop = 0;
+        float lastFreqHz = 0.0f;
+        bool lastVoiced = false;
+    };
+
     //==========================================================================
     // Scales/tunings, expressed as a list of cent-offsets from the root
     // (0 = root, 1200 = an octave above) rather than a fixed 12-tone-equal-

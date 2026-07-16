@@ -138,6 +138,11 @@ MentalsAutotuneAudioProcessorEditor::MentalsAutotuneAudioProcessorEditor (Mental
     addAndMakeVisible (presetSaveButton);
     presetSaveButton.addListener (this);
 
+    settingsButton.setColour (juce::TextButton::buttonColourId,  MentalsUI::Colours::slateGrayDark);
+    settingsButton.setColour (juce::TextButton::textColourOffId, MentalsUI::Colours::white);
+    addAndMakeVisible (settingsButton);
+    settingsButton.addListener (this);
+
     addAndMakeVisible (pitchHistory);
     addAndMakeVisible (splitter);
 
@@ -168,14 +173,6 @@ MentalsAutotuneAudioProcessorEditor::MentalsAutotuneAudioProcessorEditor (Mental
     scaleSelector.setColour (juce::ComboBox::arrowColourId,      MentalsUI::Colours::white);
     addAndMakeVisible (scaleSelector);
 
-    formantPreservationToggle.setColour (juce::ToggleButton::textColourId, MentalsUI::Colours::white);
-    formantPreservationToggle.setColour (juce::ToggleButton::tickColourId, MentalsUI::Colours::white);
-    addAndMakeVisible (formantPreservationToggle);
-
-    adaptiveRetuneToggle.setColour (juce::ToggleButton::textColourId, MentalsUI::Colours::white);
-    adaptiveRetuneToggle.setColour (juce::ToggleButton::tickColourId, MentalsUI::Colours::white);
-    addAndMakeVisible (adaptiveRetuneToggle);
-
     retuneSpeedSlider.addToParent ("Retune Speed", *this);
     amountSlider.addToParent      ("Amount",       *this);
     mixSlider.addToParent         ("Mix",          *this);
@@ -186,6 +183,18 @@ MentalsAutotuneAudioProcessorEditor::MentalsAutotuneAudioProcessorEditor (Mental
     outputMeterLabel.attachToComponent (&outputMeter, false);
     addAndMakeVisible (outputMeterLabel);
     addAndMakeVisible (outputMeter);
+
+    // ---- Settings popup content ------------------------------------------------
+    for (auto* toggle : { &formantPreservationToggle, &adaptiveRetuneToggle, &midiControlToggle,
+                          &sidechainTuningToggle, &lowLatencyModeToggle })
+    {
+        toggle->setColour (juce::ToggleButton::textColourId, MentalsUI::Colours::white);
+        toggle->setColour (juce::ToggleButton::tickColourId, MentalsUI::Colours::white);
+        settingsPanelContent.addAndMakeVisible (*toggle);
+    }
+
+    settingsPanelContent.setSize (240, 190);
+    layoutSettingsPanelContent();
 
     keyAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
         processor.apvts, "key", keySelector);
@@ -201,22 +210,38 @@ MentalsAutotuneAudioProcessorEditor::MentalsAutotuneAudioProcessorEditor (Mental
         processor.apvts, "formantPreservation", formantPreservationToggle);
     adaptiveRetuneAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         processor.apvts, "adaptiveRetune", adaptiveRetuneToggle);
+    midiControlAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        processor.apvts, "midiControl", midiControlToggle);
+    sidechainTuningAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        processor.apvts, "sidechainTuning", sidechainTuningToggle);
+    lowLatencyModeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        processor.apvts, "lowLatencyMode", lowLatencyModeToggle);
 
     setResizable (true, true);
-    setResizeLimits (780, 460, 1300, 900);
-    setSize (960, 580);
+    setResizeLimits (700, 460, 1300, 900);
+    setSize (860, 580);
 }
 
 MentalsAutotuneAudioProcessorEditor::~MentalsAutotuneAudioProcessorEditor()
 {
     presetSelector.removeListener (this);
     presetSaveButton.removeListener (this);
+    settingsButton.removeListener (this);
 }
 
 void MentalsAutotuneAudioProcessorEditor::buttonClicked (juce::Button* button)
 {
     if (button == &presetSaveButton)
+    {
         promptToSavePreset();
+        return;
+    }
+
+    if (button == &settingsButton)
+    {
+        showSettingsPanel();
+        return;
+    }
 }
 
 void MentalsAutotuneAudioProcessorEditor::comboBoxChanged (juce::ComboBox* box)
@@ -273,6 +298,25 @@ void MentalsAutotuneAudioProcessorEditor::promptToSavePreset()
     }), true /* deleteWhenDismissed */);
 }
 
+void MentalsAutotuneAudioProcessorEditor::layoutSettingsPanelContent()
+{
+    auto g = settingsPanelContent.getLocalBounds().reduced (10);
+
+    constexpr int rowHeight = 26, gap = 6;
+    for (auto* toggle : { &formantPreservationToggle, &adaptiveRetuneToggle, &midiControlToggle,
+                          &sidechainTuningToggle, &lowLatencyModeToggle })
+    {
+        toggle->setBounds (g.removeFromTop (rowHeight));
+        g.removeFromTop (gap);
+    }
+}
+
+void MentalsAutotuneAudioProcessorEditor::showSettingsPanel()
+{
+    layoutSettingsPanelContent();
+    MentalsUI::launchPopup (settingsPanelContent, settingsButton);
+}
+
 void MentalsAutotuneAudioProcessorEditor::paint (juce::Graphics& g)
 {
     g.fillAll (MentalsUI::Colours::charcoalBlack);
@@ -300,6 +344,8 @@ void MentalsAutotuneAudioProcessorEditor::resized()
         presetSelector.setBounds (t.removeFromLeft (160));
         t.removeFromLeft (8);
         presetSaveButton.setBounds (t.removeFromLeft (60));
+        t.removeFromLeft (8);
+        settingsButton.setBounds (t.removeFromLeft (80));
     }
 
     // Controls are bottom-anchored with a fixed height, and the pitch-
@@ -319,10 +365,6 @@ void MentalsAutotuneAudioProcessorEditor::resized()
     keyRow.removeFromLeft (12);
     scaleLabel.setBounds (keyRow.removeFromLeft (44));
     scaleSelector.setBounds (keyRow.removeFromLeft (190)); // wide enough for "22-Shruti (Just Intonation)"
-    keyRow.removeFromLeft (16);
-    formantPreservationToggle.setBounds (keyRow.removeFromLeft (170));
-    keyRow.removeFromLeft (12);
-    adaptiveRetuneToggle.setBounds (keyRow.removeFromLeft (140));
     p.removeFromTop (6);
 
     auto knobArea = p;
