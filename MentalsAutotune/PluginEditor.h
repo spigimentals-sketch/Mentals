@@ -82,9 +82,20 @@ private:
     juce::ComboBox keySelector, scaleSelector;
     MentalsUI::LabelledSlider retuneSpeedSlider, amountSlider, mixSlider;
 
+    // Manual overrides for both of Phase 1's automatic/adaptive behaviours --
+    // formant preservation is deterministic DSP rather than "AI-driven", but
+    // still gets its own bypass since it changes latency; Adaptive Retune
+    // is the one behaviour here that reacts to the input rather than just
+    // to a knob, so per the "manual override for all AI-driven features"
+    // request, it must be fully disable-able.
+    juce::ToggleButton formantPreservationToggle { "Formant Preservation" };
+    juce::ToggleButton adaptiveRetuneToggle { "Adaptive Retune" };
+
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> keyAttachment, scaleAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
         retuneSpeedAttachment, amountAttachment, mixAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>
+        formantPreservationAttachment, adaptiveRetuneAttachment;
 
     juce::Label outputMeterLabel;
     MentalsUI::LevelMeterComponent outputMeter;

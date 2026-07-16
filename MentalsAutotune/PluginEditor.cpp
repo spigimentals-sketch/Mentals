@@ -155,6 +155,14 @@ MentalsAutotuneAudioProcessorEditor::MentalsAutotuneAudioProcessorEditor (Mental
     scaleSelector.setColour (juce::ComboBox::arrowColourId,      MentalsUI::Colours::white);
     addAndMakeVisible (scaleSelector);
 
+    formantPreservationToggle.setColour (juce::ToggleButton::textColourId, MentalsUI::Colours::white);
+    formantPreservationToggle.setColour (juce::ToggleButton::tickColourId, MentalsUI::Colours::white);
+    addAndMakeVisible (formantPreservationToggle);
+
+    adaptiveRetuneToggle.setColour (juce::ToggleButton::textColourId, MentalsUI::Colours::white);
+    adaptiveRetuneToggle.setColour (juce::ToggleButton::tickColourId, MentalsUI::Colours::white);
+    addAndMakeVisible (adaptiveRetuneToggle);
+
     retuneSpeedSlider.addToParent ("Retune Speed", *this);
     amountSlider.addToParent      ("Amount",       *this);
     mixSlider.addToParent         ("Mix",          *this);
@@ -176,10 +184,14 @@ MentalsAutotuneAudioProcessorEditor::MentalsAutotuneAudioProcessorEditor (Mental
         processor.apvts, "amount", amountSlider.slider);
     mixAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processor.apvts, "mix", mixSlider.slider);
+    formantPreservationAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        processor.apvts, "formantPreservation", formantPreservationToggle);
+    adaptiveRetuneAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        processor.apvts, "adaptiveRetune", adaptiveRetuneToggle);
 
     setResizable (true, true);
-    setResizeLimits (620, 460, 1300, 900);
-    setSize (820, 580);
+    setResizeLimits (700, 460, 1300, 900);
+    setSize (900, 580);
 }
 
 MentalsAutotuneAudioProcessorEditor::~MentalsAutotuneAudioProcessorEditor()
@@ -294,6 +306,10 @@ void MentalsAutotuneAudioProcessorEditor::resized()
     keyRow.removeFromLeft (12);
     scaleLabel.setBounds (keyRow.removeFromLeft (44));
     scaleSelector.setBounds (keyRow.removeFromLeft (120));
+    keyRow.removeFromLeft (16);
+    formantPreservationToggle.setBounds (keyRow.removeFromLeft (170));
+    keyRow.removeFromLeft (12);
+    adaptiveRetuneToggle.setBounds (keyRow.removeFromLeft (140));
     p.removeFromTop (6);
 
     auto knobArea = p;

@@ -1,8 +1,10 @@
 #pragma once
 
 #include <juce_core/juce_core.h>
+#include <juce_dsp/juce_dsp.h>
 #include <array>
 #include <cmath>
+#include <complex>
 #include <vector>
 
 //==============================================================================
@@ -216,5 +218,214 @@ namespace PitchDSP
         int writePos = 0;
         float grainSizeSamples = 1764.0f; // recomputed in prepare()
         float tap1Distance = 0.0f, tap2Distance = 0.0f;
+    };
+
+    //==========================================================================
+    // Formant preservation: matches the pitch-shifted signal's coarse
+    // spectral envelope (formants/timbre) back onto the original (dry)
+    // signal's envelope, via a windowed STFT overlap-add stage running
+    // after the pitch shifter.
+    //
+    // Envelope estimation here uses a moving average over the log-magnitude
+    // spectrum, not cepstral liftering or LPC -- a simpler, lower-risk
+    // technique than the "textbook" homomorphic approach, at the cost of
+    // less precise resolution of individual formant peaks. It genuinely
+    // corrects the coarse spectral tilt/timbre a plain pitch shift distorts,
+    // which is the audible problem formant preservation exists to solve;
+    // it just isn't the state-of-the-art version of that fix.
+    //
+    // This stage adds latency (see getLatencySamples()) because an STFT
+    // frame can't be analysed until enough samples exist to fill it --
+    // the processor must delay its own dry signal by the same amount
+    // before mixing, or the dry/wet blend will comb-filter against itself.
+    //==========================================================================
+    class FormantCorrector
+    {
+    public:
+        static constexpr int fftOrder = 10;
+        static constexpr int fftSize  = 1 << fftOrder; // 1024
+        static constexpr int hopSize  = fftSize / 4;   // 256 -- 75% overlap, Hann-squared COLA
+
+        void prepare()
+        {
+            fft = std::make_unique<juce::dsp::FFT> (fftOrder);
+
+            hann.assign ((size_t) fftSize, 0.0f);
+            for (int i = 0; i < fftSize; ++i)
+                hann[(size_t) i] = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) (fftSize - 1));
+
+            dryRing.assign ((size_t) fftSize, 0.0f);
+            shiftedRing.assign ((size_t) fftSize, 0.0f);
+            ringWritePos = 0;
+            samplesUntilNextFrame = hopSize;
+
+            dryWindowed.assign ((size_t) fftSize, {});
+            shiftedWindowed.assign ((size_t) fftSize, {});
+            dryComplex.assign ((size_t) fftSize, {});
+            shiftedComplex.assign ((size_t) fftSize, {});
+            correctedComplex.assign ((size_t) fftSize, {});
+            ifftResult.assign ((size_t) fftSize, {});
+
+            logMagDry.assign ((size_t) fftSize / 2 + 1, 0.0f);
+            logMagShifted.assign ((size_t) fftSize / 2 + 1, 0.0f);
+            envelopeDry.assign ((size_t) fftSize / 2 + 1, 0.0f);
+            envelopeShifted.assign ((size_t) fftSize / 2 + 1, 0.0f);
+
+            outputAccumulator.assign ((size_t) fftSize, 0.0f);
+
+            outputFifo.assign ((size_t) fftSize * 2, 0.0f);
+            outputFifoReadPos = 0;
+            outputFifoWritePos = 0;
+            outputFifoAvailable = 0;
+
+            // Pre-load fftSize samples of silence -- this IS the stage's
+            // reported latency, giving the first real frame time to arrive
+            // before anything is read back out.
+            for (int i = 0; i < fftSize; ++i)
+                pushOutputSample (0.0f);
+
+            computeColaNormalisation();
+        }
+
+        static constexpr int getLatencySamples() noexcept { return fftSize; }
+
+        // Feeds one dry+shifted sample pair in, returns one (latency-
+        // delayed) formant-corrected sample out.
+        float process (float dry, float shifted) noexcept
+        {
+            dryRing[(size_t) ringWritePos] = dry;
+            shiftedRing[(size_t) ringWritePos] = shifted;
+            ringWritePos = (ringWritePos + 1) % fftSize;
+
+            if (--samplesUntilNextFrame <= 0)
+            {
+                samplesUntilNextFrame = hopSize;
+                processFrame();
+            }
+
+            return popOutputSample();
+        }
+
+    private:
+        void pushOutputSample (float s) noexcept
+        {
+            const int size = (int) outputFifo.size();
+            outputFifo[(size_t) outputFifoWritePos] = s;
+            outputFifoWritePos = (outputFifoWritePos + 1) % size;
+            ++outputFifoAvailable;
+        }
+
+        float popOutputSample() noexcept
+        {
+            if (outputFifoAvailable <= 0)
+                return 0.0f; // shouldn't happen -- production/consumption rates match by construction
+
+            const int size = (int) outputFifo.size();
+            const float s = outputFifo[(size_t) outputFifoReadPos];
+            outputFifoReadPos = (outputFifoReadPos + 1) % size;
+            --outputFifoAvailable;
+            return s;
+        }
+
+        void computeColaNormalisation() noexcept
+        {
+            std::vector<float> sumBuf ((size_t) (fftSize + hopSize * 8), 0.0f);
+            const int numFrames = fftSize / hopSize + 4;
+            for (int frame = 0; frame < numFrames; ++frame)
+            {
+                const int offset = frame * hopSize;
+                for (int i = 0; i < fftSize; ++i)
+                    sumBuf[(size_t) (offset + i)] += hann[(size_t) i] * hann[(size_t) i];
+            }
+            // Probe well inside the steady-state region, away from the
+            // startup edge.
+            const int probeIndex = (numFrames / 2) * hopSize + fftSize / 2;
+            colaNormalisation = juce::jmax (1.0e-6f, sumBuf[(size_t) probeIndex]);
+        }
+
+        void processFrame() noexcept
+        {
+            // Unwrap the rings into chronological order (oldest sample
+            // first -- ringWritePos always points at the oldest remaining
+            // sample) with a Hann analysis window applied.
+            for (int i = 0; i < fftSize; ++i)
+            {
+                const int idx = (ringWritePos + i) % fftSize;
+                const float w = hann[(size_t) i];
+                dryWindowed[(size_t) i]     = { dryRing[(size_t) idx] * w, 0.0f };
+                shiftedWindowed[(size_t) i] = { shiftedRing[(size_t) idx] * w, 0.0f };
+            }
+
+            fft->perform (dryWindowed.data(), dryComplex.data(), false);
+            fft->perform (shiftedWindowed.data(), shiftedComplex.data(), false);
+
+            for (int k = 0; k <= fftSize / 2; ++k)
+            {
+                logMagDry[(size_t) k]     = std::log (juce::jmax (std::abs (dryComplex[(size_t) k]), 1.0e-8f));
+                logMagShifted[(size_t) k] = std::log (juce::jmax (std::abs (shiftedComplex[(size_t) k]), 1.0e-8f));
+            }
+
+            // Moving-average spectral envelope (see class comment).
+            constexpr int smoothRadius = 8;
+            for (int k = 0; k <= fftSize / 2; ++k)
+            {
+                float sumDry = 0.0f, sumShifted = 0.0f;
+                int count = 0;
+                for (int j = juce::jmax (0, k - smoothRadius); j <= juce::jmin (fftSize / 2, k + smoothRadius); ++j)
+                {
+                    sumDry     += logMagDry[(size_t) j];
+                    sumShifted += logMagShifted[(size_t) j];
+                    ++count;
+                }
+                envelopeDry[(size_t) k]     = sumDry / (float) count;
+                envelopeShifted[(size_t) k] = sumShifted / (float) count;
+            }
+
+            // Scale each bin by the desired/actual envelope ratio -- this
+            // rescales magnitude while leaving phase untouched (multiplying
+            // a complex number by a positive real scalar only changes its
+            // magnitude), so there's no need to separately track phase.
+            // Clamped to roughly +-18dB so a silent/noisy frame can't
+            // produce an extreme, unstable correction.
+            for (int k = 0; k <= fftSize / 2; ++k)
+            {
+                const float correctionNats = juce::jlimit (-2.07f, 2.07f, envelopeDry[(size_t) k] - envelopeShifted[(size_t) k]);
+                const float ratio = std::exp (correctionNats);
+                correctedComplex[(size_t) k] = shiftedComplex[(size_t) k] * ratio;
+            }
+            for (int k = fftSize / 2 + 1; k < fftSize; ++k)
+                correctedComplex[(size_t) k] = std::conj (correctedComplex[(size_t) (fftSize - k)]);
+
+            fft->perform (correctedComplex.data(), ifftResult.data(), true);
+
+            for (int i = 0; i < fftSize; ++i)
+                outputAccumulator[(size_t) i] += ifftResult[(size_t) i].real() * hann[(size_t) i] / colaNormalisation;
+
+            for (int i = 0; i < hopSize; ++i)
+                pushOutputSample (outputAccumulator[(size_t) i]);
+
+            // Shift the accumulator left by hopSize and zero-pad the newly-
+            // exposed tail, ready for the next frame's overlap-add.
+            for (int i = 0; i < fftSize - hopSize; ++i)
+                outputAccumulator[(size_t) i] = outputAccumulator[(size_t) (i + hopSize)];
+            for (int i = fftSize - hopSize; i < fftSize; ++i)
+                outputAccumulator[(size_t) i] = 0.0f;
+        }
+
+        std::unique_ptr<juce::dsp::FFT> fft;
+        std::vector<float> hann;
+
+        std::vector<float> dryRing, shiftedRing;
+        int ringWritePos = 0;
+        int samplesUntilNextFrame = hopSize;
+
+        std::vector<std::complex<float>> dryWindowed, shiftedWindowed, dryComplex, shiftedComplex, correctedComplex, ifftResult;
+        std::vector<float> logMagDry, logMagShifted, envelopeDry, envelopeShifted;
+
+        std::vector<float> outputAccumulator;
+        float colaNormalisation = 1.0f;
+
+        std::vector<float> outputFifo;
+        int outputFifoReadPos = 0, outputFifoWritePos = 0, outputFifoAvailable = 0;
     };
 }

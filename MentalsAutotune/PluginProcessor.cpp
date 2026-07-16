@@ -8,11 +8,13 @@ MentalsAutotuneAudioProcessor::MentalsAutotuneAudioProcessor()
                            .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "PARAMETERS", createParameterLayout())
 {
-    keyParam         = dynamic_cast<juce::AudioParameterChoice*> (apvts.getParameter ("key"));
-    scaleParam       = dynamic_cast<juce::AudioParameterChoice*> (apvts.getParameter ("scale"));
-    retuneSpeedParam = dynamic_cast<juce::AudioParameterFloat*>  (apvts.getParameter ("retuneSpeed"));
-    amountParam      = dynamic_cast<juce::AudioParameterFloat*>  (apvts.getParameter ("amount"));
-    mixParam         = dynamic_cast<juce::AudioParameterFloat*>  (apvts.getParameter ("mix"));
+    keyParam                 = dynamic_cast<juce::AudioParameterChoice*> (apvts.getParameter ("key"));
+    scaleParam               = dynamic_cast<juce::AudioParameterChoice*> (apvts.getParameter ("scale"));
+    retuneSpeedParam         = dynamic_cast<juce::AudioParameterFloat*>  (apvts.getParameter ("retuneSpeed"));
+    amountParam              = dynamic_cast<juce::AudioParameterFloat*>  (apvts.getParameter ("amount"));
+    mixParam                 = dynamic_cast<juce::AudioParameterFloat*>  (apvts.getParameter ("mix"));
+    formantPreservationParam = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("formantPreservation"));
+    adaptiveRetuneParam      = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("adaptiveRetune"));
 }
 
 //==============================================================================
@@ -43,6 +45,12 @@ juce::AudioProcessorValueTreeState::ParameterLayout MentalsAutotuneAudioProcesso
         juce::NormalisableRange<float> (0.0f, 100.0f, 0.01f), 100.0f,
         juce::AudioParameterFloatAttributes().withLabel ("%")));
 
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "formantPreservation", "Formant Preservation", true));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "adaptiveRetune", "Adaptive Retune", true));
+
     return { params.begin(), params.end() };
 }
 
@@ -66,12 +74,30 @@ void MentalsAutotuneAudioProcessor::prepareToPlay (double sampleRate, int sample
     for (auto& shifter : pitchShifters)
         shifter.prepare (sampleRate);
 
+    for (auto& corrector : formantCorrectors)
+        corrector.prepare();
+
+    // Sized to the formant corrector's fixed latency regardless of whether
+    // it's currently enabled, so toggling it on/off at runtime never needs
+    // a reallocation on the audio thread.
+    for (int ch = 0; ch < maxSupportedChannels; ++ch)
+    {
+        dryDelayLines[(size_t) ch].assign ((size_t) PitchDSP::FormantCorrector::fftSize, 0.0f);
+        dryDelayWritePos[(size_t) ch] = 0;
+    }
+
+    stabilityHistory.fill (0.0f);
+    stabilityHistoryCount = 0;
+    stabilityHistoryPos = 0;
+
     lastDetectedFreqHz = 0.0f;
     lastTargetFreqHz   = 0.0f;
     lastIsVoiced       = false;
 
     outputPeakLinear = 0.0f;
     clipHoldBlocksRemaining = 0;
+
+    lastReportedLatencySamples = -1; // force processBlock to (re)announce it on the first block
 }
 
 bool MentalsAutotuneAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -124,12 +150,47 @@ void MentalsAutotuneAudioProcessor::runPitchDetectionAndUpdateTarget()
         lastDetectedFreqHz.store (detectedFreqHz);
         lastTargetFreqHz.store (targetFreqHz);
         lastIsVoiced.store (true);
+
+        // Feed Adaptive Retune's stability tracker -- one push per
+        // detection cycle (not per sample).
+        stabilityHistory[(size_t) stabilityHistoryPos] = semitoneFromA4;
+        stabilityHistoryPos = (stabilityHistoryPos + 1) % stabilityHistoryLength;
+        stabilityHistoryCount = juce::jmin (stabilityHistoryCount + 1, stabilityHistoryLength);
     }
     else
     {
         targetRatio = 1.0f; // no confident pitch (silence/unvoiced/noise) -- pass through unshifted
         lastIsVoiced.store (false);
+        stabilityHistoryCount = 0; // a gap in voicing resets the stability read, rather than bridging across silence
     }
+}
+
+float MentalsAutotuneAudioProcessor::computeStabilityScore() const noexcept
+{
+    if (stabilityHistoryCount < 2)
+        return 0.0f; // not enough history yet -- treat as "unstable" (gentlest correction) until proven otherwise
+
+    float mean = 0.0f;
+    for (int i = 0; i < stabilityHistoryCount; ++i)
+        mean += stabilityHistory[(size_t) i];
+    mean /= (float) stabilityHistoryCount;
+
+    float variance = 0.0f;
+    for (int i = 0; i < stabilityHistoryCount; ++i)
+    {
+        const float diff = stabilityHistory[(size_t) i] - mean;
+        variance += diff * diff;
+    }
+    variance /= (float) stabilityHistoryCount;
+
+    const float stdDevSemitones = std::sqrt (variance);
+
+    // A standard deviation of ~1.5 semitones across the recent window is
+    // treated as "fully unstable" (fast run/expressive slide/vibrato);
+    // near 0 is "fully stable" (a held, steady note).
+    constexpr float maxExpectedMovement = 1.5f;
+    const float instability = juce::jlimit (0.0f, 1.0f, stdDevSemitones / maxExpectedMovement);
+    return 1.0f - instability;
 }
 
 void MentalsAutotuneAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
@@ -141,9 +202,17 @@ void MentalsAutotuneAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     const int numSamples  = buffer.getNumSamples();
 
     const float mix = juce::jlimit (0.0f, 1.0f, mixParam->get() * 0.01f);
+    const bool formantPreservationOn = formantPreservationParam->get();
+    const bool adaptiveRetuneOn      = adaptiveRetuneParam->get();
 
-    const float retuneMs    = juce::jmax (1.0f, retuneSpeedParam->get());
-    const float retuneCoeff = std::exp (-1.0f / (0.001f * retuneMs * (float) currentSampleRate));
+    const int desiredLatency = formantPreservationOn ? PitchDSP::FormantCorrector::getLatencySamples() : 0;
+    if (desiredLatency != lastReportedLatencySamples)
+    {
+        lastReportedLatencySamples = desiredLatency;
+        setLatencySamples (desiredLatency);
+    }
+
+    const float baseRetuneMs = juce::jmax (1.0f, retuneSpeedParam->get());
 
     for (int n = 0; n < numSamples; ++n)
     {
@@ -161,6 +230,20 @@ void MentalsAutotuneAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
             runPitchDetectionAndUpdateTarget();
         }
 
+        // Adaptive Retune: a steady note (high stability) gets a shorter
+        // effective retune time (snappier); a moving pitch (low stability)
+        // gets a longer one (gentler, less likely to fight an intentional
+        // slide/vibrato). Recomputed every sample is unnecessary given
+        // stability itself only updates once per detection cycle, but it's
+        // cheap enough not to bother gating further.
+        float effectiveRetuneMs = baseRetuneMs;
+        if (adaptiveRetuneOn)
+        {
+            const float stability = computeStabilityScore();
+            const float multiplier = juce::jmap (stability, 0.0f, 1.0f, 2.5f, 0.4f);
+            effectiveRetuneMs = baseRetuneMs * multiplier;
+        }
+        const float retuneCoeff = std::exp (-1.0f / (0.001f * effectiveRetuneMs * (float) currentSampleRate));
         smoothedRatio = retuneCoeff * smoothedRatio + (1.0f - retuneCoeff) * targetRatio;
 
         for (int ch = 0; ch < numChannels; ++ch)
@@ -168,7 +251,28 @@ void MentalsAutotuneAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
             auto* data = buffer.getWritePointer (ch);
             const float dry     = data[n];
             const float shifted = pitchShifters[(size_t) ch].process (dry, smoothedRatio);
-            data[n] = dry * (1.0f - mix) + shifted * mix;
+
+            if (formantPreservationOn)
+            {
+                // The formant corrector's output lags its input by
+                // fftSize samples, so the dry signal mixed against it must
+                // be delayed by the same amount, or the dry/wet blend would
+                // comb-filter against itself.
+                auto& delayLine = dryDelayLines[(size_t) ch];
+                const int delaySize = (int) delayLine.size();
+                int& writePos = dryDelayWritePos[(size_t) ch];
+
+                const float delayedDry = delayLine[(size_t) writePos];
+                delayLine[(size_t) writePos] = dry;
+                writePos = (writePos + 1) % delaySize;
+
+                const float corrected = formantCorrectors[(size_t) ch].process (dry, shifted);
+                data[n] = delayedDry * (1.0f - mix) + corrected * mix;
+            }
+            else
+            {
+                data[n] = dry * (1.0f - mix) + shifted * mix;
+            }
         }
     }
 

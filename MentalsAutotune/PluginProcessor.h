@@ -8,8 +8,17 @@
 
 //==============================================================================
 // Mentals Autotune: monophonic pitch correction. See PitchDSP.h for the
-// detection/shifting approach and its honestly-disclosed limitations
-// (no formant correction, granular rather than PSOLA/phase-vocoder shifting).
+// detection/shifting/formant-correction approach and its honestly-disclosed
+// limitations (granular rather than PSOLA/phase-vocoder shifting; formant
+// envelope matching via spectral smoothing rather than cepstral/LPC methods).
+//
+// Adaptive Retune reacts to how STABLE the recently detected pitch has been
+// (see computeStabilityScore()): a sustained, steady note gets snappier
+// correction, while a fast run or expressive slide gets a gentler, slower
+// correction so it doesn't fight the performer's own pitch movement -- one
+// mechanism serving what would otherwise be three separate asks ("dynamic
+// pitch tracking for sustained notes vs. fast runs", "emotion-aware tuning",
+// and "adaptive retune speed").
 //==============================================================================
 class MentalsAutotuneAudioProcessor : public juce::AudioProcessor
 {
@@ -59,16 +68,19 @@ public:
     float getTargetFrequencyHz() const noexcept { return lastTargetFreqHz.load(); }
     bool isVoiced() const noexcept { return lastIsVoiced.load(); }
 
-    juce::AudioParameterChoice* keyParam         = nullptr;
-    juce::AudioParameterChoice* scaleParam       = nullptr;
-    juce::AudioParameterFloat*  retuneSpeedParam = nullptr;
-    juce::AudioParameterFloat*  amountParam      = nullptr;
-    juce::AudioParameterFloat*  mixParam         = nullptr;
+    juce::AudioParameterChoice* keyParam               = nullptr;
+    juce::AudioParameterChoice* scaleParam             = nullptr;
+    juce::AudioParameterFloat*  retuneSpeedParam       = nullptr;
+    juce::AudioParameterFloat*  amountParam            = nullptr;
+    juce::AudioParameterFloat*  mixParam               = nullptr;
+    juce::AudioParameterBool*   formantPreservationParam = nullptr;
+    juce::AudioParameterBool*   adaptiveRetuneParam      = nullptr;
 
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     void updateOutputLevelMeter (const juce::AudioBuffer<float>& buffer);
     void runPitchDetectionAndUpdateTarget();
+    float computeStabilityScore() const noexcept;
 
     double currentSampleRate = 44100.0;
 
@@ -92,6 +104,26 @@ private:
     float smoothedRatio  = 1.0f; // glides towards targetRatio every sample, at Retune Speed's rate
 
     std::array<PitchDSP::PitchShifterChannel, maxSupportedChannels> pitchShifters;
+
+    // Formant preservation stage (see PitchDSP::FormantCorrector) plus the
+    // matching dry-signal delay it requires: mixing an undelayed dry signal
+    // against the formant corrector's necessarily-delayed output would
+    // comb-filter the two against each other, so the dry path is run
+    // through its own plain delay line of the same length whenever the
+    // stage is active.
+    std::array<PitchDSP::FormantCorrector, maxSupportedChannels> formantCorrectors;
+    std::array<std::vector<float>, maxSupportedChannels> dryDelayLines;
+    std::array<int, maxSupportedChannels> dryDelayWritePos {};
+    int lastReportedLatencySamples = -1;
+
+    // Adaptive Retune's note-stability tracking: a short history of recently
+    // detected semitone values (one push per detection cycle, not per
+    // sample), whose recent spread determines how "steady" the pitch has
+    // been.
+    static constexpr int stabilityHistoryLength = 6;
+    std::array<float, stabilityHistoryLength> stabilityHistory {};
+    int stabilityHistoryCount = 0;
+    int stabilityHistoryPos = 0;
 
     std::atomic<float> lastDetectedFreqHz { 0.0f };
     std::atomic<float> lastTargetFreqHz   { 0.0f };
