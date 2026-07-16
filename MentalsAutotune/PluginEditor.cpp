@@ -47,20 +47,28 @@ void PitchHistoryComponent::paint (juce::Graphics& g)
         return bounds.getBottom() - t * bounds.getHeight();
     };
 
-    // Guide lines at in-scale semitones for the current Key/Scale.
+    // Guide lines at the current Key/Scale's actual degree positions --
+    // drawn directly from cents (not integer semitones), so microtonal
+    // scale degrees show up at their true (possibly fractional-semitone)
+    // position rather than being rounded to the nearest 12-TET line.
     const int keyIndex = processor.keyParam->getIndex();
-    const int rootOffsetFromA = keyIndex - 9; // A is index 9
-    const auto mask = PitchDSP::getScaleMask (processor.scaleParam->getIndex());
+    const float rootOffsetFromA = (float) (keyIndex - 9); // A is index 9, in semitones
 
-    for (int semitone = (int) minSemitone; semitone <= (int) maxSemitone; ++semitone)
+    const auto& scales = PitchDSP::getBuiltInScales();
+    const auto& scale  = scales[(size_t) juce::jlimit (0, (int) scales.size() - 1, processor.scaleParam->getIndex())];
+
+    for (int octave = -4; octave <= 4; ++octave)
     {
-        const int fromRoot = ((semitone - rootOffsetFromA) % 12 + 12) % 12;
-        if (! mask[(size_t) fromRoot])
-            continue;
+        for (size_t degreeIndex = 0; degreeIndex < scale.centsFromRoot.size(); ++degreeIndex)
+        {
+            const float semitoneFromA4 = scale.centsFromRoot[degreeIndex] / 100.0f + (float) octave * 12.0f + rootOffsetFromA;
+            if (semitoneFromA4 < minSemitone || semitoneFromA4 > maxSemitone)
+                continue;
 
-        const float y = yForSemitone ((float) semitone);
-        g.setColour (juce::Colours::white.withAlpha (semitone == 0 ? 0.25f : 0.08f)); // A4 line brighter
-        g.drawHorizontalLine ((int) y, bounds.getX(), bounds.getRight());
+            const float y = yForSemitone (semitoneFromA4);
+            g.setColour (juce::Colours::white.withAlpha (degreeIndex == 0 ? 0.25f : 0.08f)); // scale root brighter
+            g.drawHorizontalLine ((int) y, bounds.getX(), bounds.getRight());
+        }
     }
 
     // History lines -- broken during unvoiced gaps rather than drawn
@@ -148,7 +156,12 @@ MentalsAutotuneAudioProcessorEditor::MentalsAutotuneAudioProcessorEditor (Mental
     scaleLabel.setColour (juce::Label::textColourId, MentalsUI::Colours::white);
     addAndMakeVisible (scaleLabel);
 
-    scaleSelector.addItemList ({ "Chromatic", "Major", "Minor" }, 1);
+    {
+        juce::StringArray scaleNames;
+        for (auto& scale : PitchDSP::getBuiltInScales())
+            scaleNames.add (scale.name);
+        scaleSelector.addItemList (scaleNames, 1);
+    }
     scaleSelector.setColour (juce::ComboBox::backgroundColourId, MentalsUI::Colours::slateGrayDark);
     scaleSelector.setColour (juce::ComboBox::textColourId,       MentalsUI::Colours::white);
     scaleSelector.setColour (juce::ComboBox::outlineColourId,    MentalsUI::Colours::slateGray);
@@ -190,8 +203,8 @@ MentalsAutotuneAudioProcessorEditor::MentalsAutotuneAudioProcessorEditor (Mental
         processor.apvts, "adaptiveRetune", adaptiveRetuneToggle);
 
     setResizable (true, true);
-    setResizeLimits (700, 460, 1300, 900);
-    setSize (900, 580);
+    setResizeLimits (780, 460, 1300, 900);
+    setSize (960, 580);
 }
 
 MentalsAutotuneAudioProcessorEditor::~MentalsAutotuneAudioProcessorEditor()
@@ -305,7 +318,7 @@ void MentalsAutotuneAudioProcessorEditor::resized()
     keySelector.setBounds (keyRow.removeFromLeft (100));
     keyRow.removeFromLeft (12);
     scaleLabel.setBounds (keyRow.removeFromLeft (44));
-    scaleSelector.setBounds (keyRow.removeFromLeft (120));
+    scaleSelector.setBounds (keyRow.removeFromLeft (190)); // wide enough for "22-Shruti (Just Intonation)"
     keyRow.removeFromLeft (16);
     formantPreservationToggle.setBounds (keyRow.removeFromLeft (170));
     keyRow.removeFromLeft (12);

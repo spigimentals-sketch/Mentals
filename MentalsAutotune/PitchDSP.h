@@ -8,19 +8,19 @@
 #include <vector>
 
 //==============================================================================
-// Pitch detection (autocorrelation) and scale-snapping logic, plus the
-// grain-based pitch shifter, all kept in one place so the processor's
-// real-time path and the editor's pitch-history display agree on exactly
-// how a detected pitch maps to a corrected one.
+// Pitch detection (autocorrelation), microtonal scale-snapping, the grain-
+// based pitch shifter, and the formant corrector, all kept in one place so
+// the processor's real-time path and the editor's pitch-history display
+// agree on exactly how a detected pitch maps to a corrected one.
 //
 // Honest scope note: this is a monophonic pitch corrector using normalised
 // autocorrelation for detection and a simple two-tap crossfaded delay-line
 // ("granular") pitch shifter -- not the proprietary, phase-vocoder/PSOLA-
-// refined algorithm real commercial Auto-Tune uses, and it does not do
-// formant correction (shifting pitch without formant correction can make
-// large shifts sound "chipmunked"/unnatural -- a known, disclosed
-// limitation, not a bug). It works well on a single melodic voice or
-// instrument; it isn't designed for polyphonic material.
+// refined algorithm real commercial Auto-Tune uses. Formant preservation
+// (see FormantCorrector below) uses spectral-envelope smoothing rather than
+// cepstral liftering/LPC -- simpler, lower risk, less precise. It works well
+// on a single melodic voice or instrument; it isn't designed for polyphonic
+// material.
 //==============================================================================
 namespace PitchDSP
 {
@@ -105,45 +105,68 @@ namespace PitchDSP
     }
 
     //==========================================================================
-    // Scale masks (semitone offsets from the key's root that are valid
-    // correction targets) and the nearest-in-scale-semitone search.
+    // Scales/tunings, expressed as a list of cent-offsets from the root
+    // (0 = root, 1200 = an octave above) rather than a fixed 12-tone-equal-
+    // temperament semitone mask -- this is what lets non-12-TET systems
+    // (quarter-tone maqam scales, just-intonation raga gamuts) be
+    // represented at all, alongside the ordinary 12-TET scales.
+    //
+    // Honest scope note: "Maqam Rast"/"Maqam Bayati"/"Raga Bhairav" here are
+    // fixed-pitch-set approximations of those systems for the purpose of a
+    // pitch-correction target grid, using commonly-cited representative
+    // cent values -- real maqam/raga performance practice involves far more
+    // microtonal nuance, ornamentation, and (for ragas) different ascending
+    // vs. descending note choices than a fixed scale can capture. The
+    // 22-Shruti scale is the fuller just-intonation gamut ragas draw their
+    // specific note selections from, included as a more open-ended option.
     //==========================================================================
-    enum class Scale { Chromatic = 0, Major, Minor };
-
-    inline std::array<bool, 12> getScaleMask (int scaleIndex) noexcept
+    struct MicrotonalScale
     {
-        switch (static_cast<Scale> (scaleIndex))
+        const char* name;
+        std::vector<float> centsFromRoot; // ascending; first entry should be 0
+    };
+
+    inline const std::vector<MicrotonalScale>& getBuiltInScales()
+    {
+        static const std::vector<MicrotonalScale> scales
         {
-            case Scale::Major:
-                return { true, false, true, false, true, true, false, true, false, true, false, true };
-            case Scale::Minor:
-                return { true, false, true, true, false, true, false, true, true, false, true, false };
-            case Scale::Chromatic:
-            default:
-                return { true, true, true, true, true, true, true, true, true, true, true, true };
-        }
+            { "Chromatic",                  { 0, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100 } },
+            { "Major",                      { 0, 200, 400, 500, 700, 900, 1100 } },
+            { "Minor",                      { 0, 200, 300, 500, 700, 800, 1000 } },
+            { "Maqam Rast",                 { 0, 200, 350, 500, 700, 900, 1050 } },
+            { "Maqam Bayati",               { 0, 150, 300, 500, 700, 800, 1000 } },
+            { "Raga Bhairav",               { 0, 90, 386, 498, 702, 792, 1088 } },
+            { "22-Shruti (Just Intonation)", { 0, 90, 112, 182, 204, 294, 316, 386, 408, 498, 520,
+                                                590, 612, 702, 792, 814, 884, 906, 996, 1018, 1088, 1110 } }
+        };
+        return scales;
     }
 
-    // semitoneFromRoot can be any real (fractional, any octave) semitone
-    // distance from the selected key's root note. Scans two octaves either
-    // side to guarantee finding the true nearest in-scale semitone.
-    inline int nearestScaleSemitone (float semitoneFromRoot, const std::array<bool, 12>& scaleMask) noexcept
+    // centsFromRoot can be any real value, any octave, relative to the
+    // selected key's root note. Scans the octave above and below to
+    // guarantee finding the true nearest scale degree even near an octave
+    // boundary.
+    inline float nearestScaleCents (float centsFromRoot, const std::vector<float>& scaleCents) noexcept
     {
-        const int baseSemitone = (int) std::floor (semitoneFromRoot);
+        constexpr float octave = 1200.0f;
+        const float wrapped = std::fmod (centsFromRoot, octave);
+        const float wrappedPositive = wrapped >= 0.0f ? wrapped : wrapped + octave;
+        const float baseOctaveOffset = centsFromRoot - wrappedPositive; // nearest multiple of 1200 at or below centsFromRoot
+
         float bestDistance = 1.0e9f;
-        int best = baseSemitone;
+        float best = scaleCents.empty() ? 0.0f : scaleCents[0] + baseOctaveOffset;
 
-        for (int candidate = baseSemitone - 12; candidate <= baseSemitone + 12; ++candidate)
+        for (int octaveShift = -1; octaveShift <= 1; ++octaveShift)
         {
-            const int mod = ((candidate % 12) + 12) % 12;
-            if (! scaleMask[(size_t) mod])
-                continue;
-
-            const float distance = std::abs ((float) candidate - semitoneFromRoot);
-            if (distance < bestDistance)
+            for (float degree : scaleCents)
             {
-                bestDistance = distance;
-                best = candidate;
+                const float candidate = degree + baseOctaveOffset + (float) octaveShift * octave;
+                const float distance = std::abs (candidate - centsFromRoot);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    best = candidate;
+                }
             }
         }
 

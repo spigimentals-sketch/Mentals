@@ -82,6 +82,12 @@ private:
     void runPitchDetectionAndUpdateTarget();
     float computeStabilityScore() const noexcept;
 
+    // Writes out the built-in Natural/Robotic/Trap/Choral style presets the
+    // first time this plugin runs (skipping any name the user has already
+    // saved over), so they show up in the presets dropdown like any other
+    // saved preset without this class needing special-cased UI for them.
+    void ensureFactoryPresetsExist();
+
     double currentSampleRate = 44100.0;
 
     static constexpr float minDetectableFreqHz = 70.0f;

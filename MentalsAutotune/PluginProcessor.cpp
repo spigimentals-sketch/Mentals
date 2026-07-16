@@ -15,6 +15,57 @@ MentalsAutotuneAudioProcessor::MentalsAutotuneAudioProcessor()
     mixParam                 = dynamic_cast<juce::AudioParameterFloat*>  (apvts.getParameter ("mix"));
     formantPreservationParam = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("formantPreservation"));
     adaptiveRetuneParam      = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("adaptiveRetune"));
+
+    ensureFactoryPresetsExist();
+}
+
+//==============================================================================
+void MentalsAutotuneAudioProcessor::ensureFactoryPresetsExist()
+{
+    struct ParamValue { const char* id; float value; };
+    struct StylePreset { const char* name; std::vector<ParamValue> values; };
+
+    // "key" is deliberately never included below, so loading a style preset
+    // never overrides whatever key the user already has dialled in -- these
+    // are correction-character presets, not song presets. Robotic/Trap lean
+    // into the artificial timbre a plain (formant-uncorrected) shift gives,
+    // which is part of their character rather than an oversight.
+    const std::vector<StylePreset> stylePresets
+    {
+        { "Natural", { { "retuneSpeed", 120.0f }, { "amount", 60.0f }, { "mix", 100.0f },
+                       { "formantPreservation", 1.0f }, { "adaptiveRetune", 1.0f } } },
+
+        { "Robotic", { { "retuneSpeed", 1.0f }, { "amount", 100.0f }, { "mix", 100.0f },
+                       { "formantPreservation", 0.0f }, { "adaptiveRetune", 0.0f } } },
+
+        { "Trap",    { { "retuneSpeed", 10.0f }, { "amount", 100.0f }, { "mix", 100.0f },
+                       { "formantPreservation", 0.0f }, { "adaptiveRetune", 0.0f }, { "scale", 0.0f } } },
+
+        { "Choral",  { { "retuneSpeed", 200.0f }, { "amount", 70.0f }, { "mix", 90.0f },
+                       { "formantPreservation", 1.0f }, { "adaptiveRetune", 1.0f } } },
+    };
+
+    const auto presetsDir = presetManager.getPresetsDirectory();
+    const auto parametersTypeName = apvts.state.getType().toString();
+
+    for (auto& style : stylePresets)
+    {
+        const auto file = presetsDir.getChildFile (juce::String (style.name) + ".xml");
+        if (file.existsAsFile())
+            continue; // never overwrite a preset the user has already saved under this name
+
+        juce::XmlElement root ("MENTALS_STATE");
+        auto* parametersXml = root.createNewChildElement (parametersTypeName);
+
+        for (auto& pv : style.values)
+        {
+            auto* paramXml = parametersXml->createNewChildElement ("PARAM");
+            paramXml->setAttribute ("id", pv.id);
+            paramXml->setAttribute ("value", (double) pv.value);
+        }
+
+        root.writeTo (file);
+    }
 }
 
 //==============================================================================
@@ -26,9 +77,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout MentalsAutotuneAudioProcesso
         "key", "Key",
         juce::StringArray { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }, 0));
 
-    params.push_back (std::make_unique<juce::AudioParameterChoice> (
-        "scale", "Scale",
-        juce::StringArray { "Chromatic", "Major", "Minor" }, 0));
+    // Built from PitchDSP::getBuiltInScales() rather than a hand-duplicated
+    // list, so the parameter's choices and the actual scale data used at
+    // runtime can never drift out of sync with each other.
+    juce::StringArray scaleNames;
+    for (auto& scale : PitchDSP::getBuiltInScales())
+        scaleNames.add (scale.name);
+
+    params.push_back (std::make_unique<juce::AudioParameterChoice> ("scale", "Scale", scaleNames, 0));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "retuneSpeed", "Retune Speed",
@@ -129,19 +185,24 @@ void MentalsAutotuneAudioProcessor::runPitchDetectionAndUpdateTarget()
 
     if (found && confidence >= voicedConfidenceThreshold)
     {
-        // Map the detected frequency to the nearest note in the selected
-        // Key/Scale. Semitone distances are measured from A4 = 440Hz, then
-        // re-based so the key's root note sits at an exact multiple of 12
-        // before searching for the nearest in-scale semitone.
-        const float semitoneFromA4 = 12.0f * std::log2 (detectedFreqHz / 440.0f);
+        // Map the detected frequency to the nearest scale degree in the
+        // selected Key/Scale, working in cents (not semitones) so
+        // microtonal scales -- whose degrees don't all land on integer
+        // semitones -- are represented exactly, not just approximated to
+        // the nearest 12-TET semitone. Cent distances are measured from
+        // A4 = 440Hz, then re-based so the key's root note sits at an
+        // exact multiple of 1200 cents before searching for the nearest
+        // scale degree.
+        const float centsFromA4 = 1200.0f * std::log2 (detectedFreqHz / 440.0f);
         const int   keyIndex = keyParam->getIndex(); // 0=C..11=B
-        const float rootOffsetFromA = (float) (keyIndex - 9); // A is index 9
-        const float semitoneFromRoot = semitoneFromA4 - rootOffsetFromA;
+        const float rootOffsetFromA = (float) (keyIndex - 9) * 100.0f; // A is index 9
+        const float centsFromRoot = centsFromA4 - rootOffsetFromA;
 
-        const auto  mask = PitchDSP::getScaleMask (scaleParam->getIndex());
-        const int   nearestFromRoot = PitchDSP::nearestScaleSemitone (semitoneFromRoot, mask);
-        const float nearestFromA4   = (float) nearestFromRoot + rootOffsetFromA;
-        const float targetFreqHz    = 440.0f * std::pow (2.0f, nearestFromA4 / 12.0f);
+        const auto& scales = PitchDSP::getBuiltInScales();
+        const auto& scale  = scales[(size_t) juce::jlimit (0, (int) scales.size() - 1, scaleParam->getIndex())];
+        const float nearestFromRoot = PitchDSP::nearestScaleCents (centsFromRoot, scale.centsFromRoot);
+        const float nearestFromA4   = nearestFromRoot + rootOffsetFromA;
+        const float targetFreqHz    = 440.0f * std::pow (2.0f, nearestFromA4 / 1200.0f);
 
         const float rawRatio = targetFreqHz / detectedFreqHz;
         const float amount   = juce::jlimit (0.0f, 1.0f, amountParam->get() * 0.01f);
@@ -152,8 +213,9 @@ void MentalsAutotuneAudioProcessor::runPitchDetectionAndUpdateTarget()
         lastIsVoiced.store (true);
 
         // Feed Adaptive Retune's stability tracker -- one push per
-        // detection cycle (not per sample).
-        stabilityHistory[(size_t) stabilityHistoryPos] = semitoneFromA4;
+        // detection cycle (not per sample). Kept in semitones (not cents)
+        // since that's the unit computeStabilityScore()'s threshold uses.
+        stabilityHistory[(size_t) stabilityHistoryPos] = centsFromA4 / 100.0f;
         stabilityHistoryPos = (stabilityHistoryPos + 1) % stabilityHistoryLength;
         stabilityHistoryCount = juce::jmin (stabilityHistoryCount + 1, stabilityHistoryLength);
     }
