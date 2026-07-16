@@ -53,7 +53,7 @@ private:
 // Vertical list of rows, one per instance currently in the chain (possibly
 // none, possibly several of the same module type), laid out in the
 // processor's current chain order, plus an "+ Add Module" button that opens
-// a menu of all seven module types -- always all seven, since any of them
+// a menu of every module type -- always all of them, since any type
 // can be added more than once. Dragging a row past a neighbour reorders the
 // underlying chain live (see MentalsSuiteAudioProcessor::setChainOrder());
 // clicking one without dragging selects it for viewing.

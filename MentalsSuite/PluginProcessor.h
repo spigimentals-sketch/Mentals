@@ -5,7 +5,7 @@
 
 // Reusing each plugin's own AudioProcessor unmodified -- relative includes
 // (not bare "PluginProcessor.h") since every one of these files shares that
-// same filename; a bare include would be ambiguous once all seven of their
+// same filename; a bare include would be ambiguous once all of their
 // folders are on this target's include path.
 #include "../MentalsMultimodeEQ/PluginProcessor.h"
 #include "../MentalsDeEsser/PluginProcessor.h"
@@ -14,6 +14,7 @@
 #include "../MentalsAutotune/PluginProcessor.h"
 #include "../MentalsDelay/PluginProcessor.h"
 #include "../MentalsReverb/PluginProcessor.h"
+#include "../MentalsLimiter/PluginProcessor.h"
 
 #include <memory>
 #include <vector>
@@ -28,8 +29,8 @@
 //
 // The chain starts EMPTY (pure passthrough) -- the user builds it up by
 // adding modules one at a time via the editor's "+ Add Module" selector (see
-// PluginEditor.h's ChainListComponent). Any of the seven plugin types can be
-// added more than once (e.g. two EQ instances at different points in the
+// PluginEditor.h's ChainListComponent). Any plugin type can be added more
+// than once (e.g. two EQ instances at different points in the
 // chain) -- each addModuleToChain() call creates a genuinely new
 // AudioProcessor instance with its own independent parameters/state, not a
 // shared one. Each instance in the chain is identified by a "slot": a
@@ -77,7 +78,7 @@ public:
     void setStateInformation (const void* data, int sizeInBytes) override;
 
     //==========================================================================
-    // The seven pluggable module types. Any of them can appear zero, one, or
+    // The pluggable module types. Any of them can appear zero, one, or
     // several times in the chain -- see the class comment.
     //==========================================================================
     enum ModuleType
@@ -89,6 +90,7 @@ public:
         moduleAutotune,
         moduleDelay,
         moduleReverb,
+        moduleLimiter,
         numModuleTypes
     };
 

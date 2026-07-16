@@ -1,6 +1,6 @@
 # ----------------------------------------------------------------------------
-# Mentals Suite: hosts all seven Mentals plugins chained together inside one
-# instance, reusing each one's own AudioProcessor/Editor unmodified via a
+# Mentals Suite: hosts any number of Mentals plugins chained together inside
+# one instance, reusing each one's own AudioProcessor/Editor unmodified via a
 # juce::AudioProcessorGraph (see PluginProcessor.h) -- so it links every
 # other plugin's *Core library directly rather than duplicating any DSP.
 # ----------------------------------------------------------------------------
@@ -40,6 +40,7 @@ target_link_libraries(MentalsSuite
         MentalsAutotuneCore
         MentalsDelayCore
         MentalsReverbCore
+        MentalsLimiterCore
         juce::juce_audio_utils
         juce::juce_dsp
     PUBLIC

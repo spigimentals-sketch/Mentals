@@ -208,7 +208,7 @@ void ChainListComponent::rowRemoveRequested (int slotId)
 
 void ChainListComponent::showAddMenu()
 {
-    // Always all seven -- unlike before, a type already in the chain isn't
+    // Always every module type -- unlike before, a type already in the chain isn't
     // filtered out, since adding another instance of it is exactly the point.
     juce::PopupMenu menu;
     for (int moduleType = 0; moduleType < (int) MentalsSuiteAudioProcessor::numModuleTypes; ++moduleType)

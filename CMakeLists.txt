@@ -56,10 +56,11 @@ add_subdirectory(MentalsSaturator)
 add_subdirectory(MentalsCompressor)
 add_subdirectory(MentalsDeEsser)
 add_subdirectory(MentalsAutotune)
+add_subdirectory(MentalsLimiter)
 
 # ----------------------------------------------------------------------------
-# Mentals Suite chains all seven plugins above together in one instance --
-# added last since it links each of their *Core library targets, which must
+# Mentals Suite chains the plugins above together in one instance -- added
+# last since it links each of their *Core library targets, which must
 # already exist.
 # ----------------------------------------------------------------------------
 add_subdirectory(MentalsSuite)
