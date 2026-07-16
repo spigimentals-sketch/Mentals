@@ -62,7 +62,7 @@ public:
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
 
-    const juce::String getName() const override { return JucePlugin_Name; }
+    const juce::String getName() const override { return "Mentals Autotune"; }
     bool acceptsMidi() const override { return true; } // MIDI Control mode: a held note can drive the correction target
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }

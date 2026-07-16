@@ -1449,11 +1449,3 @@ void MultiModeEQAudioProcessor::resetToDefault()
 
     clearAllMidiLearn();
 }
-
-//==============================================================================
-// This creates the plugin's main filter -- required by the JUCE plugin
-// wrapper factory for every plugin format (VST3, AU, etc.).
-juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
-{
-    return new MultiModeEQAudioProcessor();
-}

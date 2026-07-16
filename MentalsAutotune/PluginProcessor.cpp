@@ -626,9 +626,3 @@ void MentalsAutotuneAudioProcessor::setStateInformation (const void* data, int s
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         presetManager.applyStateXml (*xml);
 }
-
-//==============================================================================
-juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
-{
-    return new MentalsAutotuneAudioProcessor();
-}

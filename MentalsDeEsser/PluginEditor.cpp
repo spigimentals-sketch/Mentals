@@ -3,9 +3,9 @@
 #include "BinaryData.h"
 
 //==============================================================================
-// TransferCurveComponent
+// DeEsserTransferCurveComponent
 //==============================================================================
-void TransferCurveComponent::paint (juce::Graphics& g)
+void DeEsserTransferCurveComponent::paint (juce::Graphics& g)
 {
     g.fillAll (MentalsUI::Colours::slateGrayDark);
 

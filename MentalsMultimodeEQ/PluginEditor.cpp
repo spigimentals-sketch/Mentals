@@ -1,6 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
-#include "BinaryData.h"
+#include "MultiModeEQBinaryData.h"
 #include <limits>
 #include <algorithm>
 #include <cmath>
@@ -460,7 +460,7 @@ MultiModeEQAudioProcessorEditor::MultiModeEQAudioProcessorEditor (MultiModeEQAud
     : AudioProcessorEditor (&p), processor (p), analyser (p), outputMeter (p)
 {
     // ---- Top bar: logo (left) + preset select/save (right of logo) -----------
-    logoImage.setImage (juce::ImageFileFormat::loadFrom (BinaryData::logo_png, (size_t) BinaryData::logo_pngSize));
+    logoImage.setImage (juce::ImageFileFormat::loadFrom (MultiModeEQBinaryData::logo_png, (size_t) MultiModeEQBinaryData::logo_pngSize));
     logoImage.setImagePlacement (juce::RectanglePlacement::centred);
     addAndMakeVisible (logoImage);
 

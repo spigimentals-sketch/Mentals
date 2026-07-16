@@ -209,9 +209,3 @@ void MentalsDeEsserAudioProcessor::setStateInformation (const void* data, int si
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         presetManager.applyStateXml (*xml);
 }
-
-//==============================================================================
-juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
-{
-    return new MentalsDeEsserAudioProcessor();
-}

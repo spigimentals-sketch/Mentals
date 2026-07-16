@@ -203,8 +203,3 @@ void MentalsDelayAudioProcessor::setStateInformation (const void* data, int size
         presetManager.applyStateXml (*xml);
 }
 
-//==============================================================================
-juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
-{
-    return new MentalsDelayAudioProcessor();
-}

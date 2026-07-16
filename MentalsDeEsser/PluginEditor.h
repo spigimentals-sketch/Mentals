@@ -12,17 +12,17 @@
 // function processBlock() uses -- so this can never show a curve that
 // doesn't match what's actually happening to the audio.
 //==============================================================================
-class TransferCurveComponent : public juce::Component,
+class DeEsserTransferCurveComponent : public juce::Component,
                                 private juce::Timer
 {
 public:
-    explicit TransferCurveComponent (MentalsDeEsserAudioProcessor& proc)
+    explicit DeEsserTransferCurveComponent (MentalsDeEsserAudioProcessor& proc)
         : processor (proc)
     {
         startTimerHz (20);
     }
 
-    ~TransferCurveComponent() override { stopTimer(); }
+    ~DeEsserTransferCurveComponent() override { stopTimer(); }
 
     void paint (juce::Graphics& g) override;
 
@@ -31,7 +31,7 @@ private:
 
     MentalsDeEsserAudioProcessor& processor;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TransferCurveComponent)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DeEsserTransferCurveComponent)
 };
 
 //==============================================================================
@@ -63,7 +63,7 @@ private:
     juce::ComboBox presetSelector;
     juce::TextButton presetSaveButton { "Save" };
 
-    TransferCurveComponent transferCurve;
+    DeEsserTransferCurveComponent transferCurve;
     MentalsUI::SplitterBar splitter;
 
     //==========================================================================

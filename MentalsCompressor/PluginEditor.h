@@ -12,17 +12,17 @@
 // never show a curve that doesn't match what's actually happening to the
 // audio.
 //==============================================================================
-class TransferCurveComponent : public juce::Component,
+class CompressorTransferCurveComponent : public juce::Component,
                                 private juce::Timer
 {
 public:
-    explicit TransferCurveComponent (MentalsCompressorAudioProcessor& proc)
+    explicit CompressorTransferCurveComponent (MentalsCompressorAudioProcessor& proc)
         : processor (proc)
     {
         startTimerHz (20);
     }
 
-    ~TransferCurveComponent() override { stopTimer(); }
+    ~CompressorTransferCurveComponent() override { stopTimer(); }
 
     void paint (juce::Graphics& g) override;
 
@@ -31,7 +31,7 @@ private:
 
     MentalsCompressorAudioProcessor& processor;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TransferCurveComponent)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CompressorTransferCurveComponent)
 };
 
 //==============================================================================
@@ -63,7 +63,7 @@ private:
     juce::ComboBox presetSelector;
     juce::TextButton presetSaveButton { "Save" };
 
-    TransferCurveComponent transferCurve;
+    CompressorTransferCurveComponent transferCurve;
     MentalsUI::SplitterBar splitter;
 
     //==========================================================================

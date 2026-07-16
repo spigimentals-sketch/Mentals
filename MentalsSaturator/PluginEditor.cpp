@@ -4,9 +4,9 @@
 #include "SaturatorDSP.h"
 
 //==============================================================================
-// TransferCurveComponent
+// SaturatorTransferCurveComponent
 //==============================================================================
-void TransferCurveComponent::paint (juce::Graphics& g)
+void SaturatorTransferCurveComponent::paint (juce::Graphics& g)
 {
     g.fillAll (MentalsUI::Colours::slateGrayDark);
 

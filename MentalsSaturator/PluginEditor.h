@@ -12,17 +12,17 @@
 // this can never show a curve that doesn't match what's actually happening
 // to the audio, unlike Delay/Reverb's illustrative parametric visualisations.
 //==============================================================================
-class TransferCurveComponent : public juce::Component,
+class SaturatorTransferCurveComponent : public juce::Component,
                                 private juce::Timer
 {
 public:
-    explicit TransferCurveComponent (MentalsSaturatorAudioProcessor& proc)
+    explicit SaturatorTransferCurveComponent (MentalsSaturatorAudioProcessor& proc)
         : processor (proc)
     {
         startTimerHz (20);
     }
 
-    ~TransferCurveComponent() override { stopTimer(); }
+    ~SaturatorTransferCurveComponent() override { stopTimer(); }
 
     void paint (juce::Graphics& g) override;
 
@@ -31,7 +31,7 @@ private:
 
     MentalsSaturatorAudioProcessor& processor;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TransferCurveComponent)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SaturatorTransferCurveComponent)
 };
 
 //==============================================================================
@@ -63,7 +63,7 @@ private:
     juce::ComboBox presetSelector;
     juce::TextButton presetSaveButton { "Save" };
 
-    TransferCurveComponent transferCurve;
+    SaturatorTransferCurveComponent transferCurve;
     MentalsUI::SplitterBar splitter;
 
     //==========================================================================

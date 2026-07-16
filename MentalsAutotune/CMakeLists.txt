@@ -1,3 +1,52 @@
+# ----------------------------------------------------------------------------
+# Core library: the actual processor/editor code, in its own static library
+# target so Mentals Suite can link it directly and host this same
+# AudioProcessor as one stage of its internal chain, without duplicating any
+# DSP, the AI Assist model, or rebuilding this plugin's UI.
+# ----------------------------------------------------------------------------
+juce_add_binary_data(MentalsAutotuneAiAssistData
+    HEADER_NAME AiAssistBinaryData.h
+    NAMESPACE AiAssistBinaryData
+    SOURCES
+        Models/ai_assist_regressor.onnx
+        Models/ai_assist_classifier.onnx)
+
+add_library(MentalsAutotuneCore STATIC
+    PluginProcessor.cpp
+    PluginEditor.cpp
+    AiAssistModel.cpp)
+
+# Core libraries aren't created via juce_add_plugin/juce_add_gui_app, so they
+# need this internal JUCE CMake helper called directly to become "JUCE-aware"
+# (it's what those juce_add_* functions call themselves) -- otherwise
+# juce_generate_juce_header() below has nowhere to generate JuceHeader.h.
+_juce_initialise_target(MentalsAutotuneCore)
+
+target_include_directories(MentalsAutotuneCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
+juce_generate_juce_header(MentalsAutotuneCore)
+
+target_compile_definitions(MentalsAutotuneCore
+    PUBLIC
+        JUCE_WEB_BROWSER=0
+        JUCE_USE_CURL=0
+        JUCE_VST3_CAN_REPLACE_VST2=0)
+
+target_link_libraries(MentalsAutotuneCore
+    PUBLIC
+        MentalsUI
+        MentalsAutotuneAiAssistData
+        onnxruntime
+        juce::juce_audio_utils
+        juce::juce_dsp
+        juce::juce_recommended_config_flags
+        juce::juce_recommended_lto_flags
+        juce::juce_recommended_warning_flags)
+
+# ----------------------------------------------------------------------------
+# The standalone/VST3/AU plugin: just wraps MentalsAutotuneCore in JUCE's
+# plugin formats.
+# ----------------------------------------------------------------------------
 juce_add_plugin(MentalsAutotune
     COMPANY_NAME "YourCompany"
     IS_SYNTH FALSE
@@ -13,41 +62,13 @@ juce_add_plugin(MentalsAutotune
 
 juce_generate_juce_header(MentalsAutotune)
 
-# ----------------------------------------------------------------------------
-# AI Assist's two trained models (see AiAssistModel.h and Models/README.md),
-# embedded the same way MentalsUI embeds mentals_logo.png -- compiled-in
-# binary data, no file to ship or locate at runtime.
-# ----------------------------------------------------------------------------
-juce_add_binary_data(MentalsAutotuneAiAssistData
-    HEADER_NAME AiAssistBinaryData.h
-    NAMESPACE AiAssistBinaryData
-    SOURCES
-        Models/ai_assist_regressor.onnx
-        Models/ai_assist_classifier.onnx)
-
 target_sources(MentalsAutotune
     PRIVATE
-        PluginProcessor.cpp
-        PluginEditor.cpp
-        AiAssistModel.cpp)
-
-target_compile_definitions(MentalsAutotune
-    PUBLIC
-        JUCE_WEB_BROWSER=0
-        JUCE_USE_CURL=0
-        JUCE_VST3_CAN_REPLACE_VST2=0)
+        CreatePluginFilter.cpp)
 
 target_link_libraries(MentalsAutotune
     PRIVATE
-        MentalsUI
-        MentalsAutotuneAiAssistData
-        onnxruntime
-        juce::juce_audio_utils
-        juce::juce_dsp
-    PUBLIC
-        juce::juce_recommended_config_flags
-        juce::juce_recommended_lto_flags
-        juce::juce_recommended_warning_flags)
+        MentalsAutotuneCore)
 
 # ----------------------------------------------------------------------------
 # onnxruntime.dll is a runtime dependency (imported SHARED library, not

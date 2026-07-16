@@ -167,8 +167,3 @@ void MentalsReverbAudioProcessor::setStateInformation (const void* data, int siz
         presetManager.applyStateXml (*xml);
 }
 
-//==============================================================================
-juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
-{
-    return new MentalsReverbAudioProcessor();
-}

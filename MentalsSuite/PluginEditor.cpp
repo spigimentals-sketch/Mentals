@@ -1,0 +1,219 @@
+#include "PluginProcessor.h"
+#include "PluginEditor.h"
+#include <algorithm>
+
+//==============================================================================
+// ChainRowComponent
+//==============================================================================
+ChainRowComponent::ChainRowComponent (ChainListComponent& ownerIn, MentalsSuiteAudioProcessor& processorIn, int moduleIdIn)
+    : moduleId (moduleIdIn), owner (ownerIn), processor (processorIn)
+{
+    bypassButton.setToggleState (processor.isModuleBypassed (moduleId), juce::dontSendNotification);
+    bypassButton.onClick = [this]
+    {
+        processor.setModuleBypassed (moduleId, bypassButton.getToggleState());
+    };
+    addAndMakeVisible (bypassButton);
+}
+
+void ChainRowComponent::paint (juce::Graphics& g)
+{
+    auto bounds = getLocalBounds().toFloat();
+
+    g.setColour (isSelected ? MentalsUI::Colours::slateGray : MentalsUI::Colours::slateGrayDark);
+    g.fillRoundedRectangle (bounds.reduced (2.0f), 4.0f);
+
+    if (isSelected)
+    {
+        g.setColour (MentalsUI::Colours::electricBlue);
+        g.drawRoundedRectangle (bounds.reduced (2.0f), 4.0f, 2.0f);
+    }
+
+    g.setColour (MentalsUI::Colours::white);
+    g.setFont (juce::Font (juce::FontOptions (16.0f, juce::Font::bold)));
+    g.drawText (MentalsSuiteAudioProcessor::getModuleName (moduleId),
+                getLocalBounds().reduced (10, 6).removeFromTop (24),
+                juce::Justification::centredLeft);
+
+    // Drag handle hint -- three horizontal bars in the top-right corner.
+    g.setColour (MentalsUI::Colours::slateGray);
+    for (int i = 0; i < 3; ++i)
+    {
+        const auto y = 8 + i * 5;
+        g.fillRect (getWidth() - 26, y, 18, 2);
+    }
+}
+
+void ChainRowComponent::resized()
+{
+    bypassButton.setBounds (getLocalBounds().reduced (10, 6).removeFromBottom (22).removeFromLeft (90));
+}
+
+void ChainRowComponent::mouseDown (const juce::MouseEvent& e)
+{
+    dragStartMouseY = e.getScreenPosition().getY();
+    dragStartComponentY = getY();
+    isDragging = false;
+}
+
+void ChainRowComponent::mouseDrag (const juce::MouseEvent& e)
+{
+    const auto dy = e.getScreenPosition().getY() - dragStartMouseY;
+
+    if (! isDragging && std::abs (dy) < 4)
+        return;
+
+    isDragging = true;
+    owner.rowDragged (moduleId, dragStartComponentY + dy);
+}
+
+void ChainRowComponent::mouseUp (const juce::MouseEvent&)
+{
+    if (isDragging)
+        owner.rowDragEnded();
+    else
+        owner.rowClicked (moduleId);
+
+    isDragging = false;
+}
+
+//==============================================================================
+// ChainListComponent
+//==============================================================================
+ChainListComponent::ChainListComponent (MentalsSuiteAudioProcessor& proc)
+    : processor (proc)
+{
+    const auto initialOrder = processor.getChainOrder();
+    visualOrder.assign (initialOrder.begin(), initialOrder.end());
+
+    for (int moduleId = 0; moduleId < (int) MentalsSuiteAudioProcessor::numModules; ++moduleId)
+    {
+        auto row = std::make_unique<ChainRowComponent> (*this, processor, moduleId);
+        addAndMakeVisible (*row);
+        rows[(size_t) moduleId] = std::move (row);
+    }
+
+    setSize (10, rowHeight * (int) MentalsSuiteAudioProcessor::numModules);
+}
+
+void ChainListComponent::resized()
+{
+    layoutRows();
+}
+
+void ChainListComponent::layoutRows (int excludeModuleId)
+{
+    for (int slot = 0; slot < (int) MentalsSuiteAudioProcessor::numModules; ++slot)
+    {
+        const int moduleId = visualOrder[(size_t) slot];
+        if (moduleId == excludeModuleId)
+            continue;
+
+        rows[(size_t) moduleId]->setBounds (0, slot * rowHeight, getWidth(), rowHeight - 4);
+    }
+}
+
+void ChainListComponent::rowDragged (int moduleId, int newScreenY)
+{
+    // Let the dragged row follow the mouse directly...
+    rows[(size_t) moduleId]->setTopLeftPosition (0, juce::jlimit (0,
+        rowHeight * ((int) MentalsSuiteAudioProcessor::numModules - 1), newScreenY));
+
+    // ...and figure out which slot its centre now falls in, swapping it into
+    // that slot in visualOrder if it's moved far enough.
+    const int currentSlot = (int) std::distance (visualOrder.begin(),
+        std::find (visualOrder.begin(), visualOrder.end(), moduleId));
+    const int targetSlot = juce::jlimit (0, (int) MentalsSuiteAudioProcessor::numModules - 1,
+        (newScreenY + rowHeight / 2) / rowHeight);
+
+    if (targetSlot != currentSlot)
+    {
+        visualOrder.erase (visualOrder.begin() + currentSlot);
+        visualOrder.insert (visualOrder.begin() + targetSlot, moduleId);
+    }
+
+    layoutRows (moduleId);
+}
+
+void ChainListComponent::rowDragEnded()
+{
+    layoutRows();
+
+    std::array<int, (size_t) MentalsSuiteAudioProcessor::numModules> newOrder {};
+    std::copy (visualOrder.begin(), visualOrder.end(), newOrder.begin());
+    processor.setChainOrder (newOrder);
+}
+
+void ChainListComponent::rowClicked (int moduleId)
+{
+    selectedModuleId = moduleId;
+    for (auto& row : rows)
+        row->isSelected = (row->moduleId == moduleId);
+    repaint();
+
+    if (onModuleSelected)
+        onModuleSelected (moduleId);
+}
+
+//==============================================================================
+// MentalsSuiteAudioProcessorEditor
+//==============================================================================
+MentalsSuiteAudioProcessorEditor::MentalsSuiteAudioProcessorEditor (MentalsSuiteAudioProcessor& p)
+    : juce::AudioProcessorEditor (&p), processor (p), chainList (p)
+{
+    productNameLabel.setText ("MENTALS SUITE", juce::dontSendNotification);
+    productNameLabel.setFont (juce::Font (juce::FontOptions (20.0f, juce::Font::bold)));
+    productNameLabel.setColour (juce::Label::textColourId, MentalsUI::Colours::white);
+    addAndMakeVisible (productNameLabel);
+
+    addAndMakeVisible (chainList);
+    chainList.onModuleSelected = [this] (int moduleId) { showModule (moduleId); };
+
+    moduleViewport.setScrollBarsShown (true, true);
+    addAndMakeVisible (moduleViewport);
+
+    setResizable (true, true);
+    setResizeLimits (1000, 650, 1800, 1100);
+    setSize (1100, 700);
+
+    showModule (processor.getChainOrder()[0]);
+}
+
+MentalsSuiteAudioProcessorEditor::~MentalsSuiteAudioProcessorEditor()
+{
+    moduleViewport.setViewedComponent (nullptr, false);
+}
+
+void MentalsSuiteAudioProcessorEditor::showModule (int moduleId)
+{
+    if (currentlyShownModuleId == moduleId)
+        return;
+
+    if (moduleEditors[(size_t) moduleId] == nullptr)
+    {
+        auto* innerProcessor = processor.getModuleProcessor (moduleId);
+        moduleEditors[(size_t) moduleId].reset (innerProcessor->createEditorAndMakeActive());
+    }
+
+    currentlyShownModuleId = moduleId;
+    chainList.rowClicked (moduleId);
+
+    auto* editor = moduleEditors[(size_t) moduleId].get();
+    moduleViewport.setViewedComponent (editor, false); // fills/scrolls within whatever resized() gives it below
+}
+
+void MentalsSuiteAudioProcessorEditor::paint (juce::Graphics& g)
+{
+    g.fillAll (MentalsUI::Colours::charcoalBlack);
+}
+
+void MentalsSuiteAudioProcessorEditor::resized()
+{
+    auto bounds = getLocalBounds();
+
+    auto topBar = bounds.removeFromTop (topBarHeight);
+    productNameLabel.setBounds (topBar.reduced (10, 0));
+
+    chainList.setBounds (bounds.removeFromLeft (chainListWidth));
+    moduleViewport.setBounds (bounds);
+}
