@@ -20,6 +20,13 @@ MentalsAutotuneAudioProcessor::MentalsAutotuneAudioProcessor()
     sidechainTuningParam     = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("sidechainTuning"));
     lowLatencyModeParam      = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("lowLatencyMode"));
 
+    harmony1EnabledParam = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("harmony1Enabled"));
+    harmony1DegreeParam  = dynamic_cast<juce::AudioParameterInt*>   (apvts.getParameter ("harmony1Degree"));
+    harmony1LevelParam   = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("harmony1Level"));
+    harmony2EnabledParam = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("harmony2Enabled"));
+    harmony2DegreeParam  = dynamic_cast<juce::AudioParameterInt*>   (apvts.getParameter ("harmony2Degree"));
+    harmony2LevelParam   = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("harmony2Level"));
+
     ensureFactoryPresetsExist();
 }
 
@@ -120,6 +127,24 @@ juce::AudioProcessorValueTreeState::ParameterLayout MentalsAutotuneAudioProcesso
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "lowLatencyMode", "Low-Latency Mode", false));
 
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "harmony1Enabled", "Harmony 1", false));
+    params.push_back (std::make_unique<juce::AudioParameterInt> (
+        "harmony1Degree", "Harmony 1 Degree", -12, 12, 2)); // +2 scale degrees = a "3rd above" on a 7-note scale
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "harmony1Level", "Harmony 1 Level",
+        juce::NormalisableRange<float> (-24.0f, 0.0f, 0.01f), -6.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("dB")));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "harmony2Enabled", "Harmony 2", false));
+    params.push_back (std::make_unique<juce::AudioParameterInt> (
+        "harmony2Degree", "Harmony 2 Degree", -12, 12, -2)); // a "3rd below" by default
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "harmony2Level", "Harmony 2 Level",
+        juce::NormalisableRange<float> (-24.0f, 0.0f, 0.01f), -6.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("dB")));
+
     return { params.begin(), params.end() };
 }
 
@@ -140,12 +165,23 @@ void MentalsAutotuneAudioProcessor::prepareToPlay (double sampleRate, int sample
 
     targetRatio   = 1.0f;
     smoothedRatio = 1.0f;
+    targetHarmony1Ratio = smoothedHarmony1Ratio = 1.0f;
+    targetHarmony2Ratio = smoothedHarmony2Ratio = 1.0f;
 
     for (auto& shifter : pitchShifters)
+        shifter.prepare (sampleRate);
+    for (auto& shifter : harmony1Shifters)
+        shifter.prepare (sampleRate);
+    for (auto& shifter : harmony2Shifters)
         shifter.prepare (sampleRate);
 
     for (auto& corrector : formantCorrectors)
         corrector.prepare();
+
+    vocalAnalysisSemitones.assign ((size_t) vocalAnalysisCaptureCount, 0.0f);
+    vocalAnalysisCollected = 0;
+    vocalAnalysisCapturing = false;
+    vocalAnalysisReady = false;
 
     // Sized to the formant corrector's fixed latency regardless of whether
     // it's currently enabled, so toggling it on/off at runtime never needs
@@ -259,6 +295,20 @@ void MentalsAutotuneAudioProcessor::runPitchDetectionAndUpdateTarget()
         stabilityHistory[(size_t) stabilityHistoryPos] = centsFromA4 / 100.0f;
         stabilityHistoryPos = (stabilityHistoryPos + 1) % stabilityHistoryLength;
         stabilityHistoryCount = juce::jmin (stabilityHistoryCount + 1, stabilityHistoryLength);
+
+        // AI Assist capture: only ever appends, never resizes, while
+        // capturing -- see the member comment for why that makes reading it
+        // from the message thread (once vocalAnalysisReady is observed)
+        // safe without a lock.
+        if (vocalAnalysisCapturing.load() && vocalAnalysisCollected < vocalAnalysisCaptureCount)
+        {
+            vocalAnalysisSemitones[(size_t) vocalAnalysisCollected++] = centsFromA4 / 100.0f;
+            if (vocalAnalysisCollected >= vocalAnalysisCaptureCount)
+            {
+                vocalAnalysisCapturing.store (false);
+                vocalAnalysisReady.store (true);
+            }
+        }
     }
     else
     {
@@ -310,6 +360,23 @@ void MentalsAutotuneAudioProcessor::runPitchDetectionAndUpdateTarget()
 
         targetFreqHz = 440.0f * std::pow (2.0f, nearestFromA4 / 1200.0f);
         haveTarget = true;
+
+        // Harmonizer: only engages here, during ordinary scale-snapping
+        // (see class comment) -- each voice shifts the DRY signal from the
+        // detected pitch to a target N scale degrees away from the note
+        // just matched above.
+        if (harmony1EnabledParam->get())
+        {
+            const float harmony1FromRoot = PitchDSP::nearestScaleDegreeCents (centsFromRoot, scale.centsFromRoot, harmony1DegreeParam->get());
+            const float harmony1FreqHz   = 440.0f * std::pow (2.0f, (harmony1FromRoot + rootOffsetFromA) / 1200.0f);
+            targetHarmony1Ratio = harmony1FreqHz / detectedFreqHz;
+        }
+        if (harmony2EnabledParam->get())
+        {
+            const float harmony2FromRoot = PitchDSP::nearestScaleDegreeCents (centsFromRoot, scale.centsFromRoot, harmony2DegreeParam->get());
+            const float harmony2FreqHz   = 440.0f * std::pow (2.0f, (harmony2FromRoot + rootOffsetFromA) / 1200.0f);
+            targetHarmony2Ratio = harmony2FreqHz / detectedFreqHz;
+        }
     }
 
     if (haveTarget)
@@ -353,6 +420,70 @@ float MentalsAutotuneAudioProcessor::computeStabilityScore() const noexcept
     return 1.0f - instability;
 }
 
+void MentalsAutotuneAudioProcessor::beginVocalAnalysis()
+{
+    vocalAnalysisCollected = 0;
+    vocalAnalysisReady.store (false);
+    vocalAnalysisCapturing.store (true);
+}
+
+bool MentalsAutotuneAudioProcessor::applySuggestedVocalSettings()
+{
+    if (! vocalAnalysisReady.load())
+        return false;
+
+    // Copy out before clearing the ready flag -- a fresh beginVocalAnalysis()
+    // call could otherwise start overwriting the buffer again soon after.
+    const std::vector<float> semitones = vocalAnalysisSemitones;
+    vocalAnalysisReady.store (false);
+
+    if (semitones.size() < 2)
+        return false;
+
+    float sumAbsDelta = 0.0f;
+    float minSemitone = semitones[0], maxSemitone = semitones[0];
+    for (size_t i = 0; i < semitones.size(); ++i)
+    {
+        minSemitone = juce::jmin (minSemitone, semitones[i]);
+        maxSemitone = juce::jmax (maxSemitone, semitones[i]);
+        if (i > 0)
+            sumAbsDelta += std::abs (semitones[i] - semitones[i - 1]);
+    }
+    const float avgAbsDelta = sumAbsDelta / (float) (semitones.size() - 1); // semitones of movement per hop, on average
+    const float pitchRange  = maxSemitone - minSemitone;
+
+    // Heuristic mapping: steadier singing (low average movement) suggests a
+    // slower, gentler correction that leaves natural expression alone;
+    // more movement suggests a snappier, stronger correction to keep up
+    // with faster material. The 0.8-semitone-per-hop reference point is a
+    // practical calibration choice, not measured from a corpus of real
+    // vocal recordings -- this is a heuristic starting suggestion to tweak
+    // from, not a guaranteed-optimal setting.
+    const float movementNorm = juce::jlimit (0.0f, 1.0f, avgAbsDelta / 0.8f);
+    const float suggestedRetuneMs = juce::jmap (movementNorm, 250.0f, 15.0f);
+    const float suggestedAmount   = juce::jmap (movementNorm, 55.0f, 100.0f);
+
+    retuneSpeedParam->setValueNotifyingHost (retuneSpeedParam->convertTo0to1 (suggestedRetuneMs));
+    amountParam->setValueNotifyingHost (amountParam->convertTo0to1 (suggestedAmount));
+
+    lastSuggestedRetuneMs.store (suggestedRetuneMs);
+    lastSuggestedAmount.store (suggestedAmount);
+
+    // Rough "closest character" label, purely as feedback text -- not a
+    // classifier trained to recognise these styles by name, just four
+    // buckets over the same two measured numbers above. Real vocal styles
+    // vary far more than two numbers can capture; treat this as a
+    // conversation-starter, not a verdict.
+    int labelIndex;
+    if (avgAbsDelta < 0.15f && pitchRange < 5.0f)   labelIndex = 0; // Sustained / Ballad
+    else if (avgAbsDelta < 0.30f)                    labelIndex = 1; // Pop / Natural
+    else if (avgAbsDelta < 0.60f)                     labelIndex = 2; // Melodic / R&B
+    else                                              labelIndex = 3; // Rap / Fast Rhythmic
+    lastAnalysisLabelIndex.store (labelIndex);
+
+    return true;
+}
+
 void MentalsAutotuneAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     juce::ScopedNoDenormals noDenormals;
@@ -378,6 +509,11 @@ void MentalsAutotuneAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     }
 
     const float baseRetuneMs = juce::jmax (1.0f, retuneSpeedParam->get());
+
+    const bool harmony1On = harmony1EnabledParam->get();
+    const bool harmony2On = harmony2EnabledParam->get();
+    const float harmony1Gain = juce::Decibels::decibelsToGain (harmony1LevelParam->get());
+    const float harmony2Gain = juce::Decibels::decibelsToGain (harmony2LevelParam->get());
 
     for (int n = 0; n < numSamples; ++n)
     {
@@ -419,6 +555,8 @@ void MentalsAutotuneAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
         }
         const float retuneCoeff = std::exp (-1.0f / (0.001f * effectiveRetuneMs * (float) currentSampleRate));
         smoothedRatio = retuneCoeff * smoothedRatio + (1.0f - retuneCoeff) * targetRatio;
+        smoothedHarmony1Ratio = retuneCoeff * smoothedHarmony1Ratio + (1.0f - retuneCoeff) * targetHarmony1Ratio;
+        smoothedHarmony2Ratio = retuneCoeff * smoothedHarmony2Ratio + (1.0f - retuneCoeff) * targetHarmony2Ratio;
 
         for (int ch = 0; ch < numChannels; ++ch)
         {
@@ -447,6 +585,15 @@ void MentalsAutotuneAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
             {
                 data[n] = dry * (1.0f - mix) + shifted * mix;
             }
+
+            // Harmonizer: added on top of whatever the main voice's output
+            // is, each at its own level -- these voices have no "dry"
+            // equivalent of their own, so they aren't part of the Mix
+            // blend above, just extra material layered in.
+            if (harmony1On)
+                data[n] += harmony1Shifters[(size_t) ch].process (dry, smoothedHarmony1Ratio) * harmony1Gain;
+            if (harmony2On)
+                data[n] += harmony2Shifters[(size_t) ch].process (dry, smoothedHarmony2Ratio) * harmony2Gain;
         }
     }
 

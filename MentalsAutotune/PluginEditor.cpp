@@ -143,6 +143,16 @@ MentalsAutotuneAudioProcessorEditor::MentalsAutotuneAudioProcessorEditor (Mental
     addAndMakeVisible (settingsButton);
     settingsButton.addListener (this);
 
+    aiAssistButton.setColour (juce::TextButton::buttonColourId,  MentalsUI::Colours::electricBlue);
+    aiAssistButton.setColour (juce::TextButton::textColourOffId, MentalsUI::Colours::white);
+    addAndMakeVisible (aiAssistButton);
+    aiAssistButton.addListener (this);
+
+    harmonyButton.setColour (juce::TextButton::buttonColourId,  MentalsUI::Colours::slateGrayDark);
+    harmonyButton.setColour (juce::TextButton::textColourOffId, MentalsUI::Colours::white);
+    addAndMakeVisible (harmonyButton);
+    harmonyButton.addListener (this);
+
     addAndMakeVisible (pitchHistory);
     addAndMakeVisible (splitter);
 
@@ -196,6 +206,50 @@ MentalsAutotuneAudioProcessorEditor::MentalsAutotuneAudioProcessorEditor (Mental
     settingsPanelContent.setSize (240, 190);
     layoutSettingsPanelContent();
 
+    // ---- AI Assist popup content ------------------------------------------------
+    aiAssistLabel.setText ("AI Assist", juce::dontSendNotification);
+    aiAssistLabel.setColour (juce::Label::textColourId, MentalsUI::Colours::white);
+    aiAssistPanelContent.addAndMakeVisible (aiAssistLabel);
+
+    for (auto* b : { &aiAssistAnalyseButton, &aiAssistApplyButton })
+    {
+        b->setColour (juce::TextButton::buttonColourId,  MentalsUI::Colours::slateGrayDark);
+        b->setColour (juce::TextButton::textColourOffId, MentalsUI::Colours::white);
+        aiAssistPanelContent.addAndMakeVisible (*b);
+        b->addListener (this);
+    }
+
+    aiAssistStatusLabel.setColour (juce::Label::textColourId, MentalsUI::Colours::slateGray);
+    aiAssistStatusLabel.setText ("Not analysed", juce::dontSendNotification);
+    aiAssistPanelContent.addAndMakeVisible (aiAssistStatusLabel);
+
+    aiAssistPanelContent.setSize (300, 100);
+    layoutAiAssistPanelContent();
+
+    // ---- Harmony popup content ----------------------------------------------------
+    harmony1Label.setText ("Harmony 1", juce::dontSendNotification);
+    harmony1Label.setColour (juce::Label::textColourId, MentalsUI::Colours::white);
+    harmonyPanelContent.addAndMakeVisible (harmony1Label);
+
+    harmony2Label.setText ("Harmony 2", juce::dontSendNotification);
+    harmony2Label.setColour (juce::Label::textColourId, MentalsUI::Colours::white);
+    harmonyPanelContent.addAndMakeVisible (harmony2Label);
+
+    for (auto* toggle : { &harmony1EnabledToggle, &harmony2EnabledToggle })
+    {
+        toggle->setColour (juce::ToggleButton::textColourId, MentalsUI::Colours::white);
+        toggle->setColour (juce::ToggleButton::tickColourId, MentalsUI::Colours::white);
+        harmonyPanelContent.addAndMakeVisible (*toggle);
+    }
+
+    harmony1DegreeSlider.addToParent ("Degree", harmonyPanelContent);
+    harmony1LevelSlider.addToParent  ("Level",  harmonyPanelContent);
+    harmony2DegreeSlider.addToParent ("Degree", harmonyPanelContent);
+    harmony2LevelSlider.addToParent  ("Level",  harmonyPanelContent);
+
+    harmonyPanelContent.setSize (320, 280);
+    layoutHarmonyPanelContent();
+
     keyAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
         processor.apvts, "key", keySelector);
     scaleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
@@ -217,16 +271,34 @@ MentalsAutotuneAudioProcessorEditor::MentalsAutotuneAudioProcessorEditor (Mental
     lowLatencyModeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         processor.apvts, "lowLatencyMode", lowLatencyModeToggle);
 
+    harmony1EnabledAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        processor.apvts, "harmony1Enabled", harmony1EnabledToggle);
+    harmony1DegreeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        processor.apvts, "harmony1Degree", harmony1DegreeSlider.slider);
+    harmony1LevelAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        processor.apvts, "harmony1Level", harmony1LevelSlider.slider);
+    harmony2EnabledAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        processor.apvts, "harmony2Enabled", harmony2EnabledToggle);
+    harmony2DegreeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        processor.apvts, "harmony2Degree", harmony2DegreeSlider.slider);
+    harmony2LevelAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        processor.apvts, "harmony2Level", harmony2LevelSlider.slider);
+
+    startTimer (300);
+
     setResizable (true, true);
-    setResizeLimits (700, 460, 1300, 900);
-    setSize (860, 580);
+    setResizeLimits (900, 460, 1400, 900);
+    setSize (1040, 580);
 }
 
 MentalsAutotuneAudioProcessorEditor::~MentalsAutotuneAudioProcessorEditor()
 {
+    stopTimer();
+
     presetSelector.removeListener (this);
-    presetSaveButton.removeListener (this);
-    settingsButton.removeListener (this);
+    for (auto* b : { &presetSaveButton, &settingsButton, &aiAssistButton, &harmonyButton,
+                     &aiAssistAnalyseButton, &aiAssistApplyButton })
+        b->removeListener (this);
 }
 
 void MentalsAutotuneAudioProcessorEditor::buttonClicked (juce::Button* button)
@@ -242,6 +314,47 @@ void MentalsAutotuneAudioProcessorEditor::buttonClicked (juce::Button* button)
         showSettingsPanel();
         return;
     }
+
+    if (button == &aiAssistButton)
+    {
+        showAiAssistPanel();
+        return;
+    }
+
+    if (button == &harmonyButton)
+    {
+        showHarmonyPanel();
+        return;
+    }
+
+    if (button == &aiAssistAnalyseButton)
+    {
+        processor.beginVocalAnalysis();
+        aiAssistStatusLabel.setText ("Listening to input...", juce::dontSendNotification);
+        aiAssistWasCapturing = true;
+        return;
+    }
+
+    if (button == &aiAssistApplyButton)
+    {
+        const bool applied = processor.applySuggestedVocalSettings();
+        if (applied)
+        {
+            static constexpr const char* labels[] = { "Sustained / Ballad", "Pop / Natural", "Melodic / R&B", "Rap / Fast Rhythmic" };
+            const int labelIndex = processor.getVocalAnalysisLabelIndex();
+            const juce::String labelText = (labelIndex >= 0 && labelIndex < 4) ? labels[labelIndex] : "Unknown";
+
+            aiAssistStatusLabel.setText (
+                "Closest match: " + labelText + " -- Retune " + juce::String (processor.getSuggestedRetuneSpeedMs(), 0)
+                    + "ms, Amount " + juce::String (processor.getSuggestedAmount(), 0) + "%",
+                juce::dontSendNotification);
+        }
+        else
+        {
+            aiAssistStatusLabel.setText ("Nothing to apply -- analyze first", juce::dontSendNotification);
+        }
+        return;
+    }
 }
 
 void MentalsAutotuneAudioProcessorEditor::comboBoxChanged (juce::ComboBox* box)
@@ -254,6 +367,31 @@ void MentalsAutotuneAudioProcessorEditor::comboBoxChanged (juce::ComboBox* box)
         processor.resetToDefault();
     else if (name.isNotEmpty())
         processor.presetManager.loadPreset (name);
+}
+
+void MentalsAutotuneAudioProcessorEditor::timerCallback()
+{
+    updateAiAssistStatusLabel();
+}
+
+void MentalsAutotuneAudioProcessorEditor::updateAiAssistStatusLabel()
+{
+    // Only touches the label while actively capturing, or right at the
+    // moment capture finishes -- otherwise leaves whatever buttonClicked()
+    // last set there (e.g. the suggestion result), rather than stomping on
+    // it every 300ms.
+    const bool capturing = processor.isVocalAnalysisCapturing();
+
+    if (capturing)
+    {
+        aiAssistStatusLabel.setText ("Listening to input...", juce::dontSendNotification);
+        aiAssistWasCapturing = true;
+    }
+    else if (aiAssistWasCapturing)
+    {
+        aiAssistWasCapturing = false;
+        aiAssistStatusLabel.setText ("Ready -- click Apply Suggestion", juce::dontSendNotification);
+    }
 }
 
 void MentalsAutotuneAudioProcessorEditor::refreshPresetList()
@@ -317,6 +455,55 @@ void MentalsAutotuneAudioProcessorEditor::showSettingsPanel()
     MentalsUI::launchPopup (settingsPanelContent, settingsButton);
 }
 
+void MentalsAutotuneAudioProcessorEditor::layoutAiAssistPanelContent()
+{
+    auto g = aiAssistPanelContent.getLocalBounds().reduced (10);
+
+    aiAssistLabel.setBounds (g.removeFromTop (18));
+    g.removeFromTop (4);
+    auto row = g.removeFromTop (26);
+    aiAssistAnalyseButton.setBounds (row.removeFromLeft (90));
+    row.removeFromLeft (6);
+    aiAssistApplyButton.setBounds (row);
+    g.removeFromTop (6);
+    aiAssistStatusLabel.setBounds (g.removeFromTop (40));
+}
+
+void MentalsAutotuneAudioProcessorEditor::showAiAssistPanel()
+{
+    layoutAiAssistPanelContent();
+    MentalsUI::launchPopup (aiAssistPanelContent, aiAssistButton);
+}
+
+void MentalsAutotuneAudioProcessorEditor::layoutHarmonyPanelContent()
+{
+    auto g = harmonyPanelContent.getLocalBounds().reduced (10);
+
+    auto layoutVoice = [&] (juce::Label& label, juce::ToggleButton& enabledToggle,
+                            MentalsUI::LabelledSlider& degreeSlider, MentalsUI::LabelledSlider& levelSlider)
+    {
+        auto row = g.removeFromTop (18);
+        label.setBounds (row.removeFromLeft (100));
+        enabledToggle.setBounds (row);
+        g.removeFromTop (24); // headroom for the knobs' attachToComponent labels above them
+
+        auto knobRow = g.removeFromTop (70);
+        const int cellWidth = knobRow.getWidth() / 2;
+        degreeSlider.slider.setBounds (knobRow.removeFromLeft (cellWidth).reduced (10, 0));
+        levelSlider.slider.setBounds (knobRow.reduced (10, 0));
+        g.removeFromTop (12);
+    };
+
+    layoutVoice (harmony1Label, harmony1EnabledToggle, harmony1DegreeSlider, harmony1LevelSlider);
+    layoutVoice (harmony2Label, harmony2EnabledToggle, harmony2DegreeSlider, harmony2LevelSlider);
+}
+
+void MentalsAutotuneAudioProcessorEditor::showHarmonyPanel()
+{
+    layoutHarmonyPanelContent();
+    MentalsUI::launchPopup (harmonyPanelContent, harmonyButton);
+}
+
 void MentalsAutotuneAudioProcessorEditor::paint (juce::Graphics& g)
 {
     g.fillAll (MentalsUI::Colours::charcoalBlack);
@@ -346,6 +533,10 @@ void MentalsAutotuneAudioProcessorEditor::resized()
         presetSaveButton.setBounds (t.removeFromLeft (60));
         t.removeFromLeft (8);
         settingsButton.setBounds (t.removeFromLeft (80));
+        t.removeFromLeft (8);
+        aiAssistButton.setBounds (t.removeFromLeft (90));
+        t.removeFromLeft (8);
+        harmonyButton.setBounds (t.removeFromLeft (90));
     }
 
     // Controls are bottom-anchored with a fixed height, and the pitch-

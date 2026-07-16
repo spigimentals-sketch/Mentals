@@ -244,6 +244,54 @@ namespace PitchDSP
         return best;
     }
 
+    // Like nearestScaleCents(), but then steps degreeOffset scale degrees up
+    // (positive) or down (negative) from whichever degree was nearest,
+    // wrapping across octave boundaries as needed -- used by the
+    // harmonizer to generate harmonies that respect the current Key/Scale
+    // (including microtonal ones) rather than fixed semitone intervals,
+    // which wouldn't make sense for a non-12-TET scale.
+    inline float nearestScaleDegreeCents (float centsFromRoot, const std::vector<float>& scaleCents, int degreeOffset) noexcept
+    {
+        if (scaleCents.empty())
+            return centsFromRoot;
+
+        constexpr float octave = 1200.0f;
+        const float wrapped = std::fmod (centsFromRoot, octave);
+        const float wrappedPositive = wrapped >= 0.0f ? wrapped : wrapped + octave;
+        const float baseOctaveOffset = centsFromRoot - wrappedPositive;
+
+        float bestDistance = 1.0e9f;
+        int bestOctaveShift = 0;
+        int bestDegreeIndex = 0;
+
+        for (int octaveShift = -1; octaveShift <= 1; ++octaveShift)
+        {
+            for (int degreeIndex = 0; degreeIndex < (int) scaleCents.size(); ++degreeIndex)
+            {
+                const float candidate = scaleCents[(size_t) degreeIndex] + baseOctaveOffset + (float) octaveShift * octave;
+                const float distance = std::abs (candidate - centsFromRoot);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    bestOctaveShift = octaveShift;
+                    bestDegreeIndex = degreeIndex;
+                }
+            }
+        }
+
+        const int numDegrees = (int) scaleCents.size();
+        const int totalStepIndex = bestOctaveShift * numDegrees + bestDegreeIndex + degreeOffset;
+
+        // Floor division (not C++'s truncating integer division), so a
+        // negative totalStepIndex wraps to the correct lower octave rather
+        // than rounding towards zero.
+        const int finalOctaveShift  = (totalStepIndex >= 0) ? (totalStepIndex / numDegrees)
+                                                             : -(((-totalStepIndex) + numDegrees - 1) / numDegrees);
+        const int finalDegreeIndex  = totalStepIndex - finalOctaveShift * numDegrees;
+
+        return scaleCents[(size_t) finalDegreeIndex] + baseOctaveOffset + (float) finalOctaveShift * octave;
+    }
+
     //==========================================================================
     // Two-tap crossfaded delay-line ("granular") pitch shifter. Each tap
     // tracks how far behind the write pointer it's reading from

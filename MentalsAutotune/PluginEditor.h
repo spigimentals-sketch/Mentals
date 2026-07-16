@@ -46,7 +46,8 @@ private:
 //==============================================================================
 class MentalsAutotuneAudioProcessorEditor : public juce::AudioProcessorEditor,
                                              private juce::Button::Listener,
-                                             private juce::ComboBox::Listener
+                                             private juce::ComboBox::Listener,
+                                             private juce::Timer
 {
 public:
     explicit MentalsAutotuneAudioProcessorEditor (MentalsAutotuneAudioProcessor&);
@@ -58,11 +59,17 @@ public:
 private:
     void buttonClicked (juce::Button*) override;
     void comboBoxChanged (juce::ComboBox*) override;
+    void timerCallback() override;
     void parentHierarchyChanged() override { MentalsUI::enableMaximiseButtonIfStandalone (*this); }
     void refreshPresetList();
     void promptToSavePreset();
     void showSettingsPanel();
     void layoutSettingsPanelContent();
+    void showAiAssistPanel();
+    void layoutAiAssistPanelContent();
+    void updateAiAssistStatusLabel();
+    void showHarmonyPanel();
+    void layoutHarmonyPanelContent();
 
     MentalsAutotuneAudioProcessor& processor;
 
@@ -78,6 +85,10 @@ private:
     juce::TextButton presetSaveButton { "Save" };
     juce::TextButton settingsButton { "Settings" };
     juce::Component settingsPanelContent;
+    juce::TextButton aiAssistButton { "AI Assist" };
+    juce::Component aiAssistPanelContent;
+    juce::TextButton harmonyButton { "Harmony" };
+    juce::Component harmonyPanelContent;
 
     PitchHistoryComponent pitchHistory;
     MentalsUI::SplitterBar splitter;
@@ -112,6 +123,35 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>
         formantPreservationAttachment, adaptiveRetuneAttachment,
         midiControlAttachment, sidechainTuningAttachment, lowLatencyModeAttachment;
+
+    //==========================================================================
+    // AI Assist popup content: rule-based analysis of the input's own
+    // recently-detected pitch movement (see
+    // MentalsAutotuneAudioProcessor::applySuggestedVocalSettings()'s
+    // comment for exactly what's measured) -- not a trained model, same
+    // disclosed approach as Mentals Multimode EQ's AI Assist.
+    //==========================================================================
+    juce::Label aiAssistLabel, aiAssistStatusLabel;
+    juce::TextButton aiAssistAnalyseButton { "Analyze" };
+    juce::TextButton aiAssistApplyButton { "Apply Suggestion" };
+    bool aiAssistWasCapturing = false; // edge-detects capture-just-finished, to flip the status label once
+
+    //==========================================================================
+    // Harmony popup content: two independent harmony voices, each shifting
+    // the dry signal by a configurable number of scale degrees (not fixed
+    // semitones -- see PitchDSP::nearestScaleDegreeCents()) from the
+    // detected pitch. Only engage during ordinary scale-snapping (see
+    // MentalsAutotuneAudioProcessor's class comment for that scope
+    // boundary) and don't go through Formant Preservation.
+    //==========================================================================
+    juce::Label harmony1Label, harmony2Label;
+    juce::ToggleButton harmony1EnabledToggle { "Enabled" }, harmony2EnabledToggle { "Enabled" };
+    MentalsUI::LabelledSlider harmony1DegreeSlider, harmony1LevelSlider;
+    MentalsUI::LabelledSlider harmony2DegreeSlider, harmony2LevelSlider;
+
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> harmony1EnabledAttachment, harmony2EnabledAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        harmony1DegreeAttachment, harmony1LevelAttachment, harmony2DegreeAttachment, harmony2LevelAttachment;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MentalsAutotuneAudioProcessorEditor)
 };

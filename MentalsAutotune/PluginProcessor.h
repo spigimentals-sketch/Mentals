@@ -25,6 +25,20 @@
 // a held MIDI note (MIDI Control), the sidechain bus's own detected pitch
 // (Sidechain Tuning), or ordinary scale-snapping -- see
 // runPitchDetectionAndUpdateTarget()'s comment for exactly how they combine.
+//
+// The Harmonizer (2 voices) only engages during ordinary scale-snapping --
+// harmonising "whatever MIDI note is held" or a sidechain target isn't
+// something this generates, a deliberate scope boundary. Each voice shifts
+// the DRY signal by a configurable number of scale degrees (not fixed
+// semitones, so it stays correct on non-12-TET scales) from the detected
+// pitch, and does not go through Formant Preservation (that would need up
+// to 3x the FormantCorrector instances for a feature that's already
+// disclosed as a simplified spectral-smoothing approximation, not worth
+// tripling the CPU cost of).
+//
+// AI Assist (see beginVocalAnalysis()) is rule-based analysis of the
+// input's own recently-detected pitch movement, not a trained model --
+// same disclosed approach as Mentals Multimode EQ's AI Assist feature.
 //==============================================================================
 class MentalsAutotuneAudioProcessor : public juce::AudioProcessor
 {
@@ -84,6 +98,39 @@ public:
     juce::AudioParameterBool*   midiControlParam         = nullptr;
     juce::AudioParameterBool*   sidechainTuningParam     = nullptr;
     juce::AudioParameterBool*   lowLatencyModeParam      = nullptr;
+
+    juce::AudioParameterBool*  harmony1EnabledParam = nullptr;
+    juce::AudioParameterInt*   harmony1DegreeParam  = nullptr;
+    juce::AudioParameterFloat* harmony1LevelParam   = nullptr;
+    juce::AudioParameterBool*  harmony2EnabledParam = nullptr;
+    juce::AudioParameterInt*   harmony2DegreeParam  = nullptr;
+    juce::AudioParameterFloat* harmony2LevelParam   = nullptr;
+
+    //==========================================================================
+    // AI Assist: listens to a few seconds of live input, then suggests a
+    // Retune Speed/Amount pairing based on how much the detected pitch
+    // actually moved during that capture (steadier singing -> gentler,
+    // slower suggestion; more movement -> snappier, stronger suggestion),
+    // plus a rough "closest character" label purely as feedback text. This
+    // is rule-based analysis of real, measured pitch behaviour, not a
+    // classifier trained to recognise "pop" vs. "rap" vs. "opera" by name --
+    // see applySuggestedVocalSettings()'s comment for exactly what's
+    // measured and why the label should be read as a rough approximation.
+    //==========================================================================
+    void beginVocalAnalysis();
+    bool isVocalAnalysisCapturing() const noexcept { return vocalAnalysisCapturing.load(); }
+    bool isVocalAnalysisReady() const noexcept { return vocalAnalysisReady.load(); }
+
+    // Reads the finished capture, computes and applies the suggested
+    // Retune Speed/Amount, and updates the character-label guess. Returns
+    // false (no-op) if the capture isn't ready yet.
+    bool applySuggestedVocalSettings();
+
+    // -1 = no analysis run yet; otherwise an index into the fixed label set
+    // documented in applySuggestedVocalSettings()'s definition.
+    int getVocalAnalysisLabelIndex() const noexcept { return lastAnalysisLabelIndex.load(); }
+    float getSuggestedRetuneSpeedMs() const noexcept { return lastSuggestedRetuneMs.load(); }
+    float getSuggestedAmount() const noexcept { return lastSuggestedAmount.load(); }
 
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
@@ -160,6 +207,29 @@ private:
     // optional sidechain bus, whose detected pitch becomes the correction
     // target (second priority, below MIDI Control) whenever it's confident.
     PitchDSP::StreamingPitchDetector sidechainDetector;
+
+    // Harmonizer: each voice shifts the dry signal (not the corrected
+    // signal) from the detected pitch to a target N scale degrees away,
+    // using its own PitchShifterChannel per audio channel. Ratios are only
+    // updated during ordinary scale-snapping (see class comment); the
+    // "smoothed" values glide at the same rate as the main voice.
+    std::array<PitchDSP::PitchShifterChannel, maxSupportedChannels> harmony1Shifters, harmony2Shifters;
+    float targetHarmony1Ratio = 1.0f, smoothedHarmony1Ratio = 1.0f;
+    float targetHarmony2Ratio = 1.0f, smoothedHarmony2Ratio = 1.0f;
+
+    // AI Assist capture: a plain buffer of detected semitone values filled
+    // by the audio thread (runPitchDetectionAndUpdateTarget(), only ever
+    // appending, never resized while capturing) and read only after
+    // vocalAnalysisReady is observed true from the message thread -- no
+    // lock needed given that ordering.
+    static constexpr int vocalAnalysisCaptureCount = 100; // ~2.3s of hops at the normal window size
+    std::vector<float> vocalAnalysisSemitones;
+    int vocalAnalysisCollected = 0;
+    std::atomic<bool> vocalAnalysisCapturing { false };
+    std::atomic<bool> vocalAnalysisReady { false };
+    std::atomic<int> lastAnalysisLabelIndex { -1 };
+    std::atomic<float> lastSuggestedRetuneMs { 0.0f };
+    std::atomic<float> lastSuggestedAmount   { 0.0f };
 
     std::atomic<float> lastDetectedFreqHz { 0.0f };
     std::atomic<float> lastTargetFreqHz   { 0.0f };
