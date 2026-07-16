@@ -187,6 +187,7 @@ MentalsAutotuneAudioProcessorEditor::MentalsAutotuneAudioProcessorEditor (Mental
 
     retuneSpeedSlider.addToParent ("Retune Speed", *this);
     amountSlider.addToParent      ("Amount",       *this);
+    flexAmountSlider.addToParent  ("Flex-Tune",     *this);
     mixSlider.addToParent         ("Mix",          *this);
 
     outputMeterLabel.setText ("Out", juce::dontSendNotification);
@@ -198,14 +199,14 @@ MentalsAutotuneAudioProcessorEditor::MentalsAutotuneAudioProcessorEditor (Mental
 
     // ---- Settings popup content ------------------------------------------------
     for (auto* toggle : { &formantPreservationToggle, &adaptiveRetuneToggle, &midiControlToggle,
-                          &sidechainTuningToggle, &lowLatencyModeToggle, &flexTuneToggle })
+                          &sidechainTuningToggle, &lowLatencyModeToggle })
     {
         toggle->setColour (juce::ToggleButton::textColourId, MentalsUI::Colours::white);
         toggle->setColour (juce::ToggleButton::tickColourId, MentalsUI::Colours::white);
         settingsPanelContent.addAndMakeVisible (*toggle);
     }
 
-    settingsPanelContent.setSize (240, 222);
+    settingsPanelContent.setSize (240, 190);
     layoutSettingsPanelContent();
 
     // ---- AI Assist popup content ------------------------------------------------
@@ -262,6 +263,8 @@ MentalsAutotuneAudioProcessorEditor::MentalsAutotuneAudioProcessorEditor (Mental
         processor.apvts, "amount", amountSlider.slider);
     mixAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processor.apvts, "mix", mixSlider.slider);
+    flexAmountAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        processor.apvts, "flexAmount", flexAmountSlider.slider);
     formantPreservationAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         processor.apvts, "formantPreservation", formantPreservationToggle);
     adaptiveRetuneAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
@@ -272,8 +275,6 @@ MentalsAutotuneAudioProcessorEditor::MentalsAutotuneAudioProcessorEditor (Mental
         processor.apvts, "sidechainTuning", sidechainTuningToggle);
     lowLatencyModeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         processor.apvts, "lowLatencyMode", lowLatencyModeToggle);
-    flexTuneAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
-        processor.apvts, "flexTune", flexTuneToggle);
 
     harmony1EnabledAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         processor.apvts, "harmony1Enabled", harmony1EnabledToggle);
@@ -447,7 +448,7 @@ void MentalsAutotuneAudioProcessorEditor::layoutSettingsPanelContent()
 
     constexpr int rowHeight = 26, gap = 6;
     for (auto* toggle : { &formantPreservationToggle, &adaptiveRetuneToggle, &midiControlToggle,
-                          &sidechainTuningToggle, &lowLatencyModeToggle, &flexTuneToggle })
+                          &sidechainTuningToggle, &lowLatencyModeToggle })
     {
         toggle->setBounds (g.removeFromTop (rowHeight));
         g.removeFromTop (gap);
@@ -566,7 +567,7 @@ void MentalsAutotuneAudioProcessorEditor::resized()
     auto knobArea = p;
     knobArea.removeFromTop (20); // headroom for each knob's attachToComponent label above it
 
-    juce::Array<juce::Component*> knobs { &retuneSpeedSlider.slider, &amountSlider.slider,
+    juce::Array<juce::Component*> knobs { &retuneSpeedSlider.slider, &amountSlider.slider, &flexAmountSlider.slider,
                                            &mixSlider.slider, &outputMeter };
     const int cellWidth = knobArea.getWidth() / knobs.size();
     for (auto* knob : knobs)

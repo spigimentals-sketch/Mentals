@@ -98,12 +98,12 @@ private:
     //==========================================================================
     juce::Label keyLabel, scaleLabel;
     juce::ComboBox keySelector, scaleSelector;
-    MentalsUI::LabelledSlider retuneSpeedSlider, amountSlider;
+    MentalsUI::LabelledSlider retuneSpeedSlider, amountSlider, flexAmountSlider;
     MentalsUI::LabelledFader mixSlider; // dry/wet blend reads more naturally as a fader than a knob
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> keyAttachment, scaleAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
-        retuneSpeedAttachment, amountAttachment, mixAttachment;
+        retuneSpeedAttachment, amountAttachment, mixAttachment, flexAmountAttachment;
 
     juce::Label outputMeterLabel;
     MentalsUI::LevelMeterComponent outputMeter;
@@ -120,12 +120,10 @@ private:
     juce::ToggleButton midiControlToggle { "MIDI Control" };
     juce::ToggleButton sidechainTuningToggle { "Sidechain Tuning" };
     juce::ToggleButton lowLatencyModeToggle { "Low-Latency Mode" };
-    juce::ToggleButton flexTuneToggle { "Flex-Tune" };
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>
         formantPreservationAttachment, adaptiveRetuneAttachment,
-        midiControlAttachment, sidechainTuningAttachment, lowLatencyModeAttachment,
-        flexTuneAttachment;
+        midiControlAttachment, sidechainTuningAttachment, lowLatencyModeAttachment;
 
     //==========================================================================
     // AI Assist popup content: measures the input's own recently-detected

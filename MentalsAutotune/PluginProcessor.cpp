@@ -19,7 +19,7 @@ MentalsAutotuneAudioProcessor::MentalsAutotuneAudioProcessor()
     midiControlParam         = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("midiControl"));
     sidechainTuningParam     = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("sidechainTuning"));
     lowLatencyModeParam      = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("lowLatencyMode"));
-    flexTuneParam            = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("flexTune"));
+    flexAmountParam          = dynamic_cast<juce::AudioParameterFloat*>  (apvts.getParameter ("flexAmount"));
 
     harmony1EnabledParam = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("harmony1Enabled"));
     harmony1DegreeParam  = dynamic_cast<juce::AudioParameterInt*>   (apvts.getParameter ("harmony1Degree"));
@@ -128,8 +128,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout MentalsAutotuneAudioProcesso
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "lowLatencyMode", "Low-Latency Mode", false));
 
-    params.push_back (std::make_unique<juce::AudioParameterBool> (
-        "flexTune", "Flex-Tune", false));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "flexAmount", "Flex-Tune",
+        juce::NormalisableRange<float> (0.0f, 100.0f, 0.01f), 0.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("%")));
 
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "harmony1Enabled", "Harmony 1", false));
@@ -391,17 +393,21 @@ void MentalsAutotuneAudioProcessor::runPitchDetectionAndUpdateTarget()
         const float rawRatio = targetFreqHz / referenceFreqHz;
         float amount = juce::jlimit (0.0f, 1.0f, amountParam->get() * 0.01f);
 
-        if (flexTuneParam->get())
+        const float flexAmount = juce::jlimit (0.0f, 1.0f, flexAmountParam->get() * 0.01f);
+        if (flexAmount > 0.0f)
         {
             // Flex-Tune: scale the correction down while still far from the
-            // target, ramping back up to full Amount as the pitch closes in
-            // -- 100 cents (one semitone) as the "fully far" reference point
-            // and a 35% floor there are practical calibration choices, not
-            // measured from a corpus of real vocal recordings.
+            // target, ramping back up to full Amount as the pitch closes in,
+            // blended in by the Flex-Tune knob (0% = no effect, a hard snap;
+            // 100% = the full easing curve below) -- 100 cents (one
+            // semitone) as the "fully far" reference point and a 35% floor
+            // there are practical calibration choices, not measured from a
+            // corpus of real vocal recordings.
             constexpr float flexRangeCents = 100.0f;
             constexpr float flexFloorScale = 0.35f;
             const float flexT = juce::jlimit (0.0f, 1.0f, flexCentsOff / flexRangeCents);
-            amount *= juce::jmap (flexT, 1.0f, flexFloorScale);
+            const float fullFlexScale = juce::jmap (flexT, 1.0f, flexFloorScale);
+            amount *= juce::jmap (flexAmount, 1.0f, fullFlexScale);
         }
 
         targetRatio = 1.0f + (rawRatio - 1.0f) * amount;

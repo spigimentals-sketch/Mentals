@@ -37,12 +37,14 @@
 // disclosed as a simplified spectral-smoothing approximation, not worth
 // tripling the CPU cost of).
 //
-// Flex-Tune eases off the correction amount while the detected pitch is
-// still well away from its target scale degree (letting a natural scoop
-// or slide into the note come through undistorted), then pulls harder as
-// the pitch approaches the target -- the opposite of a hard snap that
-// corrects by the same fixed Amount regardless of how far off the note
-// started. Only meaningful during ordinary scale-snapping (see
+// Flex-Tune (a knob, 0-100%, not a toggle) eases off the correction amount
+// while the detected pitch is still well away from its target scale degree
+// (letting a natural scoop or slide into the note come through
+// undistorted), then pulls harder as the pitch approaches the target --
+// the opposite of a hard snap that corrects by the same fixed Amount
+// regardless of how far off the note started. At 0% it has no effect at
+// all (identical to a hard snap); higher settings blend in more of that
+// easing. Only meaningful during ordinary scale-snapping (see
 // runPitchDetectionAndUpdateTarget()); has no effect under MIDI Control or
 // Sidechain Tuning, where the target is an explicit override rather than
 // "whichever scale degree is nearest".
@@ -111,12 +113,12 @@ public:
     juce::AudioParameterFloat*  retuneSpeedParam       = nullptr;
     juce::AudioParameterFloat*  amountParam            = nullptr;
     juce::AudioParameterFloat*  mixParam               = nullptr;
+    juce::AudioParameterFloat*  flexAmountParam        = nullptr;
     juce::AudioParameterBool*   formantPreservationParam = nullptr;
     juce::AudioParameterBool*   adaptiveRetuneParam      = nullptr;
     juce::AudioParameterBool*   midiControlParam         = nullptr;
     juce::AudioParameterBool*   sidechainTuningParam     = nullptr;
     juce::AudioParameterBool*   lowLatencyModeParam      = nullptr;
-    juce::AudioParameterBool*   flexTuneParam            = nullptr;
 
     juce::AudioParameterBool*  harmony1EnabledParam = nullptr;
     juce::AudioParameterInt*   harmony1DegreeParam  = nullptr;
