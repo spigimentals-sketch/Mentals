@@ -137,7 +137,7 @@ void MentalsCompressorAudioProcessor::processBlock (juce::AudioBuffer<float>& bu
 
         const float envelope   = envelopeFollower.process (levelAbs);
         const float envelopeDb = juce::Decibels::gainToDecibels (envelope, -100.0f);
-        const float outputDb   = CompressorDSP::computeOutputDb (envelopeDb, thresholdDb, ratio, kneeDb);
+        const float outputDb   = MentalsUI::DynamicsDSP::computeOutputDb (envelopeDb, thresholdDb, ratio, kneeDb);
         const float gainReductionDb = outputDb - envelopeDb;
         const float gainLinear = juce::Decibels::decibelsToGain (gainReductionDb);
 

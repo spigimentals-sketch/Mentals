@@ -5,18 +5,18 @@
 #include "MentalsUI.h"
 
 //==============================================================================
-// Transfer-curve display: input level (dB) on the X axis, output level (dB)
-// on the Y axis, with a faint diagonal reference line (unity/no compression)
-// and a threshold marker. Calls MentalsUI::DynamicsDSP::computeOutputDb()
-// directly -- the exact same function processBlock() uses -- so this can
-// never show a curve that doesn't match what's actually happening to the
-// audio.
+// Transfer-curve display for the High (sibilance) band: input level (dB) on
+// the X axis, output level (dB) on the Y axis, with a faint diagonal
+// reference line, a threshold marker, and the Max Reduction floor. Calls
+// MentalsUI::DynamicsDSP::computeOutputDb() directly -- the exact same
+// function processBlock() uses -- so this can never show a curve that
+// doesn't match what's actually happening to the audio.
 //==============================================================================
 class TransferCurveComponent : public juce::Component,
                                 private juce::Timer
 {
 public:
-    explicit TransferCurveComponent (MentalsCompressorAudioProcessor& proc)
+    explicit TransferCurveComponent (MentalsDeEsserAudioProcessor& proc)
         : processor (proc)
     {
         startTimerHz (20);
@@ -29,19 +29,19 @@ public:
 private:
     void timerCallback() override { repaint(); }
 
-    MentalsCompressorAudioProcessor& processor;
+    MentalsDeEsserAudioProcessor& processor;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TransferCurveComponent)
 };
 
 //==============================================================================
-class MentalsCompressorAudioProcessorEditor : public juce::AudioProcessorEditor,
-                                               private juce::Button::Listener,
-                                               private juce::ComboBox::Listener
+class MentalsDeEsserAudioProcessorEditor : public juce::AudioProcessorEditor,
+                                            private juce::Button::Listener,
+                                            private juce::ComboBox::Listener
 {
 public:
-    explicit MentalsCompressorAudioProcessorEditor (MentalsCompressorAudioProcessor&);
-    ~MentalsCompressorAudioProcessorEditor() override;
+    explicit MentalsDeEsserAudioProcessorEditor (MentalsDeEsserAudioProcessor&);
+    ~MentalsDeEsserAudioProcessorEditor() override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -53,7 +53,7 @@ private:
     void refreshPresetList();
     void promptToSavePreset();
 
-    MentalsCompressorAudioProcessor& processor;
+    MentalsDeEsserAudioProcessor& processor;
 
     //==========================================================================
     // Top bar: shared MENTALS wordmark + product name, preset select/save.
@@ -67,21 +67,21 @@ private:
     MentalsUI::SplitterBar splitter;
 
     //==========================================================================
-    // Controls -- two rows: threshold/ratio/knee/attack/release on top,
-    // makeup/mix/sidechain toggle + meters below.
+    // Controls -- two rows: frequency/threshold/ratio/attack/release on top,
+    // max reduction/mix/listen toggle + meters below.
     //==========================================================================
-    MentalsUI::LabelledSlider thresholdSlider, ratioSlider, kneeSlider, attackSlider, releaseSlider;
-    MentalsUI::LabelledSlider makeupGainSlider, mixSlider;
-    juce::ToggleButton sidechainToggle { "Use Sidechain" };
+    MentalsUI::LabelledSlider frequencySlider, thresholdSlider, ratioSlider, attackSlider, releaseSlider;
+    MentalsUI::LabelledSlider maxReductionSlider, mixSlider;
+    juce::ToggleButton listenToggle { "Listen" };
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
-        thresholdAttachment, ratioAttachment, kneeAttachment, attackAttachment, releaseAttachment,
-        makeupGainAttachment, mixAttachment;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> sidechainAttachment;
+        frequencyAttachment, thresholdAttachment, ratioAttachment, attackAttachment, releaseAttachment,
+        maxReductionAttachment, mixAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> listenAttachment;
 
     juce::Label gainReductionMeterLabel, outputMeterLabel;
     MentalsUI::GainReductionMeterComponent gainReductionMeter;
     MentalsUI::LevelMeterComponent outputMeter;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MentalsCompressorAudioProcessorEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MentalsDeEsserAudioProcessorEditor)
 };

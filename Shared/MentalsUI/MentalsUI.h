@@ -10,3 +10,4 @@
 #include "PopupLauncher.h"
 #include "PresetManager.h"
 #include "WindowHelpers.h"
+#include "DynamicsDSP.h"
