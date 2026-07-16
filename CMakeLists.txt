@@ -28,3 +28,4 @@ add_subdirectory(Shared/MentalsUI)
 # subfolder -- see that subfolder's CMakeLists.txt for details.
 # ----------------------------------------------------------------------------
 add_subdirectory(MentalsMultimodeEQ)
+add_subdirectory(MentalsDelay)
