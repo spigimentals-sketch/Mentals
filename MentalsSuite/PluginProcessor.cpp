@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <algorithm>
 
 namespace
 {
@@ -73,9 +74,29 @@ juce::AudioProcessor* MentalsSuiteAudioProcessor::getModuleProcessor (int module
     return moduleNodes[(size_t) moduleId]->getProcessor();
 }
 
-void MentalsSuiteAudioProcessor::setChainOrder (const std::array<int, (size_t) numModules>& newOrder)
+void MentalsSuiteAudioProcessor::setChainOrder (const std::vector<int>& newOrder)
 {
     chainOrder = newOrder;
+    rebuildConnections();
+}
+
+bool MentalsSuiteAudioProcessor::isModuleInChain (int moduleId) const noexcept
+{
+    return std::find (chainOrder.begin(), chainOrder.end(), moduleId) != chainOrder.end();
+}
+
+void MentalsSuiteAudioProcessor::addModuleToChain (int moduleId)
+{
+    if (isModuleInChain (moduleId))
+        return;
+
+    chainOrder.push_back (moduleId);
+    rebuildConnections();
+}
+
+void MentalsSuiteAudioProcessor::removeModuleFromChain (int moduleId)
+{
+    chainOrder.erase (std::remove (chainOrder.begin(), chainOrder.end(), moduleId), chainOrder.end());
     rebuildConnections();
 }
 
@@ -164,14 +185,11 @@ void MentalsSuiteAudioProcessor::setStateInformation (const void* data, int size
     if (! state.isValid())
         return;
 
-    std::array<int, (size_t) numModules> newOrder = chainOrder;
+    std::vector<int> newOrder;
     const auto orderVar = state.getProperty ("chainOrder");
     if (orderVar.isArray())
-    {
-        auto& arr = *orderVar.getArray();
-        for (int i = 0; i < juce::jmin ((int) numModules, arr.size()); ++i)
-            newOrder[(size_t) i] = (int) arr.getUnchecked (i);
-    }
+        for (const auto& moduleIdVar : *orderVar.getArray())
+            newOrder.push_back ((int) moduleIdVar);
 
     for (const auto& moduleState : state)
     {

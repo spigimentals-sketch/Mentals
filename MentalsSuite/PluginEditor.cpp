@@ -14,6 +14,9 @@ ChainRowComponent::ChainRowComponent (ChainListComponent& ownerIn, MentalsSuiteA
         processor.setModuleBypassed (moduleId, bypassButton.getToggleState());
     };
     addAndMakeVisible (bypassButton);
+
+    removeButton.onClick = [this] { owner.rowRemoveRequested (moduleId); };
+    addAndMakeVisible (removeButton);
 }
 
 void ChainRowComponent::paint (juce::Graphics& g)
@@ -46,7 +49,9 @@ void ChainRowComponent::paint (juce::Graphics& g)
 
 void ChainRowComponent::resized()
 {
-    bypassButton.setBounds (getLocalBounds().reduced (10, 6).removeFromBottom (22).removeFromLeft (90));
+    auto bottomRow = getLocalBounds().reduced (10, 6).removeFromBottom (22);
+    bypassButton.setBounds (bottomRow.removeFromLeft (80));
+    removeButton.setBounds (bottomRow.removeFromRight (70));
 }
 
 void ChainRowComponent::mouseDown (const juce::MouseEvent& e)
@@ -83,17 +88,17 @@ void ChainRowComponent::mouseUp (const juce::MouseEvent&)
 ChainListComponent::ChainListComponent (MentalsSuiteAudioProcessor& proc)
     : processor (proc)
 {
-    const auto initialOrder = processor.getChainOrder();
-    visualOrder.assign (initialOrder.begin(), initialOrder.end());
-
     for (int moduleId = 0; moduleId < (int) MentalsSuiteAudioProcessor::numModules; ++moduleId)
     {
         auto row = std::make_unique<ChainRowComponent> (*this, processor, moduleId);
-        addAndMakeVisible (*row);
+        addChildComponent (*row); // not addAndMakeVisible -- refreshFromProcessor() below decides visibility
         rows[(size_t) moduleId] = std::move (row);
     }
 
-    setSize (10, rowHeight * (int) MentalsSuiteAudioProcessor::numModules);
+    addButton.onClick = [this] { showAddMenu(); };
+    addAndMakeVisible (addButton);
+
+    refreshFromProcessor();
 }
 
 void ChainListComponent::resized()
@@ -101,9 +106,20 @@ void ChainListComponent::resized()
     layoutRows();
 }
 
+void ChainListComponent::refreshFromProcessor()
+{
+    const auto order = processor.getChainOrder();
+    visualOrder.assign (order.begin(), order.end());
+
+    for (auto& row : rows)
+        row->setVisible (std::find (visualOrder.begin(), visualOrder.end(), row->moduleId) != visualOrder.end());
+
+    layoutRows();
+}
+
 void ChainListComponent::layoutRows (int excludeModuleId)
 {
-    for (int slot = 0; slot < (int) MentalsSuiteAudioProcessor::numModules; ++slot)
+    for (int slot = 0; slot < (int) visualOrder.size(); ++slot)
     {
         const int moduleId = visualOrder[(size_t) slot];
         if (moduleId == excludeModuleId)
@@ -111,20 +127,22 @@ void ChainListComponent::layoutRows (int excludeModuleId)
 
         rows[(size_t) moduleId]->setBounds (0, slot * rowHeight, getWidth(), rowHeight - 4);
     }
+
+    addButton.setBounds (10, (int) visualOrder.size() * rowHeight + 4, getWidth() - 20, addButtonHeight);
 }
 
 void ChainListComponent::rowDragged (int moduleId, int newScreenY)
 {
+    const int maxSlot = (int) visualOrder.size() - 1;
+
     // Let the dragged row follow the mouse directly...
-    rows[(size_t) moduleId]->setTopLeftPosition (0, juce::jlimit (0,
-        rowHeight * ((int) MentalsSuiteAudioProcessor::numModules - 1), newScreenY));
+    rows[(size_t) moduleId]->setTopLeftPosition (0, juce::jlimit (0, rowHeight * maxSlot, newScreenY));
 
     // ...and figure out which slot its centre now falls in, swapping it into
     // that slot in visualOrder if it's moved far enough.
     const int currentSlot = (int) std::distance (visualOrder.begin(),
         std::find (visualOrder.begin(), visualOrder.end(), moduleId));
-    const int targetSlot = juce::jlimit (0, (int) MentalsSuiteAudioProcessor::numModules - 1,
-        (newScreenY + rowHeight / 2) / rowHeight);
+    const int targetSlot = juce::jlimit (0, maxSlot, (newScreenY + rowHeight / 2) / rowHeight);
 
     if (targetSlot != currentSlot)
     {
@@ -138,10 +156,7 @@ void ChainListComponent::rowDragged (int moduleId, int newScreenY)
 void ChainListComponent::rowDragEnded()
 {
     layoutRows();
-
-    std::array<int, (size_t) MentalsSuiteAudioProcessor::numModules> newOrder {};
-    std::copy (visualOrder.begin(), visualOrder.end(), newOrder.begin());
-    processor.setChainOrder (newOrder);
+    processor.setChainOrder (visualOrder);
 }
 
 void ChainListComponent::rowClicked (int moduleId)
@@ -153,6 +168,40 @@ void ChainListComponent::rowClicked (int moduleId)
 
     if (onModuleSelected)
         onModuleSelected (moduleId);
+}
+
+void ChainListComponent::rowRemoveRequested (int moduleId)
+{
+    const bool wasSelected = (selectedModuleId == moduleId);
+
+    processor.removeModuleFromChain (moduleId);
+    refreshFromProcessor();
+
+    if (wasSelected)
+        rowClicked (visualOrder.empty() ? -1 : visualOrder.front());
+}
+
+void ChainListComponent::showAddMenu()
+{
+    juce::PopupMenu menu;
+    for (int moduleId = 0; moduleId < (int) MentalsSuiteAudioProcessor::numModules; ++moduleId)
+        if (! processor.isModuleInChain (moduleId))
+            menu.addItem (moduleId + 1, MentalsSuiteAudioProcessor::getModuleName (moduleId));
+
+    if (menu.getNumItems() == 0)
+        return;
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (addButton),
+        [this] (int result)
+        {
+            if (result <= 0)
+                return;
+
+            const int moduleId = result - 1;
+            processor.addModuleToChain (moduleId);
+            refreshFromProcessor();
+            rowClicked (moduleId);
+        });
 }
 
 //==============================================================================
@@ -172,11 +221,17 @@ MentalsSuiteAudioProcessorEditor::MentalsSuiteAudioProcessorEditor (MentalsSuite
     moduleViewport.setScrollBarsShown (true, true);
     addAndMakeVisible (moduleViewport);
 
+    emptyStateLabel.setJustificationType (juce::Justification::centred);
+    emptyStateLabel.setColour (juce::Label::textColourId, MentalsUI::Colours::slateGray);
+    emptyStateLabel.setFont (juce::Font (juce::FontOptions (18.0f)));
+    addAndMakeVisible (emptyStateLabel);
+
     setResizable (true, true);
     setResizeLimits (1000, 650, 1800, 1100);
     setSize (1100, 700);
 
-    showModule (processor.getChainOrder()[0]);
+    const auto initialOrder = processor.getChainOrder();
+    showModule (initialOrder.empty() ? -1 : initialOrder.front());
 }
 
 MentalsSuiteAudioProcessorEditor::~MentalsSuiteAudioProcessorEditor()
@@ -189,17 +244,27 @@ void MentalsSuiteAudioProcessorEditor::showModule (int moduleId)
     if (currentlyShownModuleId == moduleId)
         return;
 
+    currentlyShownModuleId = moduleId;
+    chainList.rowClicked (moduleId);
+
+    if (moduleId < 0)
+    {
+        moduleViewport.setViewedComponent (nullptr, false);
+        moduleViewport.setVisible (false);
+        emptyStateLabel.setVisible (true);
+        return;
+    }
+
+    emptyStateLabel.setVisible (false);
+    moduleViewport.setVisible (true);
+
     if (moduleEditors[(size_t) moduleId] == nullptr)
     {
         auto* innerProcessor = processor.getModuleProcessor (moduleId);
         moduleEditors[(size_t) moduleId].reset (innerProcessor->createEditorAndMakeActive());
     }
 
-    currentlyShownModuleId = moduleId;
-    chainList.rowClicked (moduleId);
-
-    auto* editor = moduleEditors[(size_t) moduleId].get();
-    moduleViewport.setViewedComponent (editor, false); // fills/scrolls within whatever resized() gives it below
+    moduleViewport.setViewedComponent (moduleEditors[(size_t) moduleId].get(), false);
 }
 
 void MentalsSuiteAudioProcessorEditor::paint (juce::Graphics& g)
@@ -216,4 +281,5 @@ void MentalsSuiteAudioProcessorEditor::resized()
 
     chainList.setBounds (bounds.removeFromLeft (chainListWidth));
     moduleViewport.setBounds (bounds);
+    emptyStateLabel.setBounds (bounds);
 }
