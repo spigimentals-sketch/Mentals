@@ -120,10 +120,12 @@ private:
     juce::ToggleButton midiControlToggle { "MIDI Control" };
     juce::ToggleButton sidechainTuningToggle { "Sidechain Tuning" };
     juce::ToggleButton lowLatencyModeToggle { "Low-Latency Mode" };
+    juce::ToggleButton flexTuneToggle { "Flex-Tune" };
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>
         formantPreservationAttachment, adaptiveRetuneAttachment,
-        midiControlAttachment, sidechainTuningAttachment, lowLatencyModeAttachment;
+        midiControlAttachment, sidechainTuningAttachment, lowLatencyModeAttachment,
+        flexTuneAttachment;
 
     //==========================================================================
     // AI Assist popup content: measures the input's own recently-detected

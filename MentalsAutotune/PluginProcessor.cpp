@@ -19,6 +19,7 @@ MentalsAutotuneAudioProcessor::MentalsAutotuneAudioProcessor()
     midiControlParam         = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("midiControl"));
     sidechainTuningParam     = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("sidechainTuning"));
     lowLatencyModeParam      = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("lowLatencyMode"));
+    flexTuneParam            = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("flexTune"));
 
     harmony1EnabledParam = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("harmony1Enabled"));
     harmony1DegreeParam  = dynamic_cast<juce::AudioParameterInt*>   (apvts.getParameter ("harmony1Degree"));
@@ -126,6 +127,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout MentalsAutotuneAudioProcesso
 
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "lowLatencyMode", "Low-Latency Mode", false));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "flexTune", "Flex-Tune", false));
 
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "harmony1Enabled", "Harmony 1", false));
@@ -324,6 +328,7 @@ void MentalsAutotuneAudioProcessor::runPitchDetectionAndUpdateTarget()
 
     float targetFreqHz = 0.0f;
     bool haveTarget = false;
+    float flexCentsOff = 0.0f; // only set during ordinary scale-snapping -- see Flex-Tune below
 
     if (midiControlParam->get() && ! heldMidiNotes.empty() && referenceFreqHz > 0.0f)
     {
@@ -358,6 +363,8 @@ void MentalsAutotuneAudioProcessor::runPitchDetectionAndUpdateTarget()
         const float nearestFromRoot = PitchDSP::nearestScaleCents (centsFromRoot, scale.centsFromRoot);
         const float nearestFromA4   = nearestFromRoot + rootOffsetFromA;
 
+        flexCentsOff = std::abs (nearestFromA4 - centsFromA4);
+
         targetFreqHz = 440.0f * std::pow (2.0f, nearestFromA4 / 1200.0f);
         haveTarget = true;
 
@@ -382,7 +389,21 @@ void MentalsAutotuneAudioProcessor::runPitchDetectionAndUpdateTarget()
     if (haveTarget)
     {
         const float rawRatio = targetFreqHz / referenceFreqHz;
-        const float amount   = juce::jlimit (0.0f, 1.0f, amountParam->get() * 0.01f);
+        float amount = juce::jlimit (0.0f, 1.0f, amountParam->get() * 0.01f);
+
+        if (flexTuneParam->get())
+        {
+            // Flex-Tune: scale the correction down while still far from the
+            // target, ramping back up to full Amount as the pitch closes in
+            // -- 100 cents (one semitone) as the "fully far" reference point
+            // and a 35% floor there are practical calibration choices, not
+            // measured from a corpus of real vocal recordings.
+            constexpr float flexRangeCents = 100.0f;
+            constexpr float flexFloorScale = 0.35f;
+            const float flexT = juce::jlimit (0.0f, 1.0f, flexCentsOff / flexRangeCents);
+            amount *= juce::jmap (flexT, 1.0f, flexFloorScale);
+        }
+
         targetRatio = 1.0f + (rawRatio - 1.0f) * amount;
         lastTargetFreqHz.store (targetFreqHz);
     }

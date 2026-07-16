@@ -37,6 +37,16 @@
 // disclosed as a simplified spectral-smoothing approximation, not worth
 // tripling the CPU cost of).
 //
+// Flex-Tune eases off the correction amount while the detected pitch is
+// still well away from its target scale degree (letting a natural scoop
+// or slide into the note come through undistorted), then pulls harder as
+// the pitch approaches the target -- the opposite of a hard snap that
+// corrects by the same fixed Amount regardless of how far off the note
+// started. Only meaningful during ordinary scale-snapping (see
+// runPitchDetectionAndUpdateTarget()); has no effect under MIDI Control or
+// Sidechain Tuning, where the target is an explicit override rather than
+// "whichever scale degree is nearest".
+//
 // AI Assist (see beginVocalAnalysis()) analyses the input's own recently-
 // detected pitch movement (avgAbsDelta/pitchRange/stdDev, computed in
 // applySuggestedVocalSettings()) and runs those three numbers through a
@@ -106,6 +116,7 @@ public:
     juce::AudioParameterBool*   midiControlParam         = nullptr;
     juce::AudioParameterBool*   sidechainTuningParam     = nullptr;
     juce::AudioParameterBool*   lowLatencyModeParam      = nullptr;
+    juce::AudioParameterBool*   flexTuneParam            = nullptr;
 
     juce::AudioParameterBool*  harmony1EnabledParam = nullptr;
     juce::AudioParameterInt*   harmony1DegreeParam  = nullptr;
