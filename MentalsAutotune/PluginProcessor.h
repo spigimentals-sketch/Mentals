@@ -3,6 +3,7 @@
 #include <JuceHeader.h>
 #include "MentalsUI.h"
 #include "PitchDSP.h"
+#include "AiAssistModel.h"
 #include <algorithm>
 #include <array>
 #include <vector>
@@ -36,9 +37,16 @@
 // disclosed as a simplified spectral-smoothing approximation, not worth
 // tripling the CPU cost of).
 //
-// AI Assist (see beginVocalAnalysis()) is rule-based analysis of the
-// input's own recently-detected pitch movement, not a trained model --
-// same disclosed approach as Mentals Multimode EQ's AI Assist feature.
+// AI Assist (see beginVocalAnalysis()) analyses the input's own recently-
+// detected pitch movement (avgAbsDelta/pitchRange/stdDev, computed in
+// applySuggestedVocalSettings()) and runs those three numbers through a
+// small trained model (see AiAssistModel.h) to get its suggested Retune
+// Speed/Amount and style label -- a regressor and classifier trained on
+// real VocalSet singing audio, with training labels generated from what
+// was originally a hand-written heuristic formula. Unlike Mentals
+// Multimode EQ's AI Assist (still the disclosed rule-based heuristic),
+// this is a genuinely trained model, not just an if/else on the same
+// numbers -- see Models/README.md for how it was trained.
 //==============================================================================
 class MentalsAutotuneAudioProcessor : public juce::AudioProcessor
 {
@@ -230,6 +238,11 @@ private:
     std::atomic<int> lastAnalysisLabelIndex { -1 };
     std::atomic<float> lastSuggestedRetuneMs { 0.0f };
     std::atomic<float> lastSuggestedAmount   { 0.0f };
+
+    // AI Assist's trained model (see AiAssistModel.h) -- constructed once
+    // here rather than lazily, since its embedded ONNX data is always
+    // present and loading it is a one-off cost paid at plugin startup.
+    AiAssistModel aiAssistModel;
 
     std::atomic<float> lastDetectedFreqHz { 0.0f };
     std::atomic<float> lastTargetFreqHz   { 0.0f };

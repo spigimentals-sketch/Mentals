@@ -125,11 +125,13 @@ private:
         midiControlAttachment, sidechainTuningAttachment, lowLatencyModeAttachment;
 
     //==========================================================================
-    // AI Assist popup content: rule-based analysis of the input's own
-    // recently-detected pitch movement (see
-    // MentalsAutotuneAudioProcessor::applySuggestedVocalSettings()'s
-    // comment for exactly what's measured) -- not a trained model, same
-    // disclosed approach as Mentals Multimode EQ's AI Assist.
+    // AI Assist popup content: measures the input's own recently-detected
+    // pitch movement, then runs that through a small trained model (see
+    // AiAssistModel.h and MentalsAutotuneAudioProcessor::
+    // applySuggestedVocalSettings()) to get the suggested Retune Speed/
+    // Amount and style label. Unlike Mentals Multimode EQ's AI Assist
+    // (still a disclosed rule-based heuristic), this one is a genuinely
+    // trained model.
     //==========================================================================
     juce::Label aiAssistLabel, aiAssistStatusLabel;
     juce::TextButton aiAssistAnalyseButton { "Analyze" };

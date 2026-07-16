@@ -441,45 +441,37 @@ bool MentalsAutotuneAudioProcessor::applySuggestedVocalSettings()
         return false;
 
     float sumAbsDelta = 0.0f;
+    float sumSemitone = 0.0f;
     float minSemitone = semitones[0], maxSemitone = semitones[0];
     for (size_t i = 0; i < semitones.size(); ++i)
     {
         minSemitone = juce::jmin (minSemitone, semitones[i]);
         maxSemitone = juce::jmax (maxSemitone, semitones[i]);
+        sumSemitone += semitones[i];
         if (i > 0)
             sumAbsDelta += std::abs (semitones[i] - semitones[i - 1]);
     }
     const float avgAbsDelta = sumAbsDelta / (float) (semitones.size() - 1); // semitones of movement per hop, on average
     const float pitchRange  = maxSemitone - minSemitone;
 
-    // Heuristic mapping: steadier singing (low average movement) suggests a
-    // slower, gentler correction that leaves natural expression alone;
-    // more movement suggests a snappier, stronger correction to keep up
-    // with faster material. The 0.8-semitone-per-hop reference point is a
-    // practical calibration choice, not measured from a corpus of real
-    // vocal recordings -- this is a heuristic starting suggestion to tweak
-    // from, not a guaranteed-optimal setting.
-    const float movementNorm = juce::jlimit (0.0f, 1.0f, avgAbsDelta / 0.8f);
-    const float suggestedRetuneMs = juce::jmap (movementNorm, 250.0f, 15.0f);
-    const float suggestedAmount   = juce::jmap (movementNorm, 55.0f, 100.0f);
+    const float meanSemitone = sumSemitone / (float) semitones.size();
+    float sumSquaredDiff = 0.0f;
+    for (float s : semitones)
+        sumSquaredDiff += (s - meanSemitone) * (s - meanSemitone);
+    const float stdDevSemitone = std::sqrt (sumSquaredDiff / (float) semitones.size());
 
-    retuneSpeedParam->setValueNotifyingHost (retuneSpeedParam->convertTo0to1 (suggestedRetuneMs));
-    amountParam->setValueNotifyingHost (amountParam->convertTo0to1 (suggestedAmount));
+    // See AiAssistModel.h: a regressor (Retune Speed/Amount) and classifier
+    // (style label) trained on real VocalSet singing audio, run on the same
+    // three numbers -- avgAbsDelta, pitchRange, stdDevSemitone -- that this
+    // feature's original heuristic formula used.
+    const auto suggestion = aiAssistModel.predict (avgAbsDelta, pitchRange, stdDevSemitone);
 
-    lastSuggestedRetuneMs.store (suggestedRetuneMs);
-    lastSuggestedAmount.store (suggestedAmount);
+    retuneSpeedParam->setValueNotifyingHost (retuneSpeedParam->convertTo0to1 (suggestion.retuneMs));
+    amountParam->setValueNotifyingHost (amountParam->convertTo0to1 (suggestion.amount));
 
-    // Rough "closest character" label, purely as feedback text -- not a
-    // classifier trained to recognise these styles by name, just four
-    // buckets over the same two measured numbers above. Real vocal styles
-    // vary far more than two numbers can capture; treat this as a
-    // conversation-starter, not a verdict.
-    int labelIndex;
-    if (avgAbsDelta < 0.15f && pitchRange < 5.0f)   labelIndex = 0; // Sustained / Ballad
-    else if (avgAbsDelta < 0.30f)                    labelIndex = 1; // Pop / Natural
-    else if (avgAbsDelta < 0.60f)                     labelIndex = 2; // Melodic / R&B
-    else                                              labelIndex = 3; // Rap / Fast Rhythmic
-    lastAnalysisLabelIndex.store (labelIndex);
+    lastSuggestedRetuneMs.store (suggestion.retuneMs);
+    lastSuggestedAmount.store (suggestion.amount);
+    lastAnalysisLabelIndex.store (suggestion.labelIndex);
 
     return true;
 }
