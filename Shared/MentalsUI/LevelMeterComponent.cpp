@@ -13,41 +13,37 @@ namespace MentalsUI
         g.setColour (clipping ? Colours::crimsonRed : Colours::slateGrayDark);
         g.fillRoundedRectangle (clipLedArea, 2.0f);
 
-        g.setColour (Colours::slateGrayDark);
+        // Recessed bezel behind the LED column.
+        g.setColour (Colours::charcoalBlack);
         g.fillRoundedRectangle (bounds, 3.0f);
 
         constexpr float minDb = -48.0f, maxDb = 6.0f;   // a little headroom above 0dB to show clipping clearly
         constexpr float safeCeilingDb = -6.0f;          // emerald below this
         constexpr float cautionCeilingDb = 0.0f;        // amber between safeCeiling and 0dB; crimson above
 
-        auto dbToY = [&] (float db)
+        // Discrete LED segments rather than a smooth gradient bar -- the
+        // classic hardware bargraph look. Each segment is either fully lit
+        // (its bottom edge is at or below the current peak) or fully dark.
+        constexpr int numSegments = 20;
+        constexpr float gap = 1.5f;
+        const float segmentHeight = (bounds.getHeight() - gap * (numSegments - 1)) / (float) numSegments;
+
+        for (int i = 0; i < numSegments; ++i)
         {
-            const float t = juce::jlimit (0.0f, 1.0f, (db - minDb) / (maxDb - minDb));
-            return bounds.getBottom() - t * bounds.getHeight();
-        };
+            // Segment 0 is at the bottom of the column.
+            const float segTop = bounds.getBottom() - (float) (i + 1) * (segmentHeight + gap) + gap;
+            juce::Rectangle<float> segment (bounds.getX(), segTop, bounds.getWidth(), segmentHeight);
 
-        const float peakY    = dbToY (juce::jlimit (minDb, maxDb, displayedPeakDb));
-        const float safeY    = dbToY (safeCeilingDb);
-        const float cautionY = dbToY (cautionCeilingDb);
+            const float segBottomDb = minDb + ((float) i / (float) numSegments) * (maxDb - minDb);
+            const bool lit = displayedPeakDb >= segBottomDb;
 
-        // Only the portion of the bar from the current peak down to the bottom
-        // is "lit"; clipping to that region and drawing the three full-height
-        // colour zones inside it gives the classic segmented meter look.
-        juce::Rectangle<float> lit (bounds.getX(), peakY, bounds.getWidth(), bounds.getBottom() - peakY);
+            juce::Colour zoneColour = Colours::emeraldGreen;
+            if (segBottomDb >= cautionCeilingDb)       zoneColour = Colours::crimsonRed;
+            else if (segBottomDb >= safeCeilingDb)      zoneColour = Colours::amberOrange;
 
-        g.saveState();
-        g.reduceClipRegion (lit.getSmallestIntegerContainer());
-
-        g.setColour (Colours::emeraldGreen);
-        g.fillRect (juce::Rectangle<float> (bounds.getX(), safeY, bounds.getWidth(), bounds.getBottom() - safeY));
-
-        g.setColour (Colours::amberOrange);
-        g.fillRect (juce::Rectangle<float> (bounds.getX(), cautionY, bounds.getWidth(), safeY - cautionY));
-
-        g.setColour (Colours::crimsonRed);
-        g.fillRect (juce::Rectangle<float> (bounds.getX(), bounds.getY(), bounds.getWidth(), cautionY - bounds.getY()));
-
-        g.restoreState();
+            g.setColour (lit ? zoneColour : zoneColour.withAlpha (0.12f));
+            g.fillRoundedRectangle (segment, 1.5f);
+        }
 
         g.setColour (Colours::slateGray);
         g.drawRoundedRectangle (bounds, 3.0f, 1.0f);

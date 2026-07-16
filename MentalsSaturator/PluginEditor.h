@@ -71,7 +71,8 @@ private:
     //==========================================================================
     juce::Label typeLabel;
     juce::ComboBox typeSelector;
-    MentalsUI::LabelledSlider driveSlider, toneSlider, outputGainSlider, mixSlider;
+    MentalsUI::LabelledSlider driveSlider, toneSlider, outputGainSlider;
+    MentalsUI::LabelledFader mixSlider; // dry/wet blend reads more naturally as a fader than a knob
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> typeAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>

@@ -71,7 +71,8 @@ private:
     // makeup/mix/sidechain toggle + meters below.
     //==========================================================================
     MentalsUI::LabelledSlider thresholdSlider, ratioSlider, kneeSlider, attackSlider, releaseSlider;
-    MentalsUI::LabelledSlider makeupGainSlider, mixSlider;
+    MentalsUI::LabelledSlider makeupGainSlider;
+    MentalsUI::LabelledFader mixSlider; // dry/wet blend reads more naturally as a fader than a knob
     juce::ToggleButton sidechainToggle { "Use Sidechain" };
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>

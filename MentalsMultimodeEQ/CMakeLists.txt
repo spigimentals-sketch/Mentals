@@ -37,6 +37,7 @@ target_compile_definitions(MultiModeEQCore
 target_link_libraries(MultiModeEQCore
     PUBLIC
         MultiModeEQBinaryData
+        MentalsUI
         juce::juce_audio_utils
         juce::juce_audio_formats
         juce::juce_dsp

@@ -71,7 +71,8 @@ private:
     //==========================================================================
     // Controls.
     //==========================================================================
-    MentalsUI::LabelledSlider delayTimeSlider, feedbackSlider, mixSlider, lowCutSlider, highCutSlider;
+    MentalsUI::LabelledSlider delayTimeSlider, feedbackSlider, lowCutSlider, highCutSlider;
+    MentalsUI::LabelledFader mixSlider; // dry/wet blend reads more naturally as a fader than a knob
     juce::ToggleButton pingPongToggle { "Ping-Pong" };
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>

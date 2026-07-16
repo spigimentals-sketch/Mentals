@@ -459,6 +459,8 @@ void SpectrumAnalyserComponent::paint (juce::Graphics& g)
 MultiModeEQAudioProcessorEditor::MultiModeEQAudioProcessorEditor (MultiModeEQAudioProcessor& p)
     : AudioProcessorEditor (&p), processor (p), analyser (p), outputMeter (p)
 {
+    setLookAndFeel (&MentalsUI::MentalsLookAndFeel::getSharedInstance());
+
     // ---- Top bar: logo (left) + preset select/save (right of logo) -----------
     logoImage.setImage (juce::ImageFileFormat::loadFrom (MultiModeEQBinaryData::logo_png, (size_t) MultiModeEQBinaryData::logo_pngSize));
     logoImage.setImagePlacement (juce::RectanglePlacement::centred);
@@ -712,6 +714,7 @@ MultiModeEQAudioProcessorEditor::MultiModeEQAudioProcessorEditor (MultiModeEQAud
 
 MultiModeEQAudioProcessorEditor::~MultiModeEQAudioProcessorEditor()
 {
+    setLookAndFeel (nullptr);
     stopTimer();
 
     for (auto& tab : bandTabs)

@@ -92,6 +92,8 @@ MentalsReverbAudioProcessorEditor::MentalsReverbAudioProcessorEditor (MentalsRev
     : AudioProcessorEditor (&p), processor (p), decayEnvelope (p),
       outputMeter ([&p] { return p.getOutputPeakDb(); }, [&p] { return p.isOutputClipping(); })
 {
+    setLookAndFeel (&MentalsUI::MentalsLookAndFeel::getSharedInstance());
+
     logoImage.setImage (juce::ImageFileFormat::loadFrom (BinaryData::mentals_logo_png, (size_t) BinaryData::mentals_logo_pngSize));
     logoImage.setImagePlacement (juce::RectanglePlacement::centred);
     addAndMakeVisible (logoImage);
@@ -155,6 +157,7 @@ MentalsReverbAudioProcessorEditor::MentalsReverbAudioProcessorEditor (MentalsRev
 
 MentalsReverbAudioProcessorEditor::~MentalsReverbAudioProcessorEditor()
 {
+    setLookAndFeel (nullptr);
     presetSelector.removeListener (this);
     presetSaveButton.removeListener (this);
 }

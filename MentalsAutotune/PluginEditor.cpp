@@ -115,6 +115,8 @@ MentalsAutotuneAudioProcessorEditor::MentalsAutotuneAudioProcessorEditor (Mental
     : AudioProcessorEditor (&p), processor (p), pitchHistory (p),
       outputMeter ([&p] { return p.getOutputPeakDb(); }, [&p] { return p.isOutputClipping(); })
 {
+    setLookAndFeel (&MentalsUI::MentalsLookAndFeel::getSharedInstance());
+
     logoImage.setImage (juce::ImageFileFormat::loadFrom (BinaryData::mentals_logo_png, (size_t) BinaryData::mentals_logo_pngSize));
     logoImage.setImagePlacement (juce::RectanglePlacement::centred);
     addAndMakeVisible (logoImage);
@@ -293,6 +295,7 @@ MentalsAutotuneAudioProcessorEditor::MentalsAutotuneAudioProcessorEditor (Mental
 
 MentalsAutotuneAudioProcessorEditor::~MentalsAutotuneAudioProcessorEditor()
 {
+    setLookAndFeel (nullptr);
     stopTimer();
 
     presetSelector.removeListener (this);

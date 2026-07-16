@@ -71,7 +71,8 @@ private:
     // max reduction/mix/listen toggle + meters below.
     //==========================================================================
     MentalsUI::LabelledSlider frequencySlider, thresholdSlider, ratioSlider, attackSlider, releaseSlider;
-    MentalsUI::LabelledSlider maxReductionSlider, mixSlider;
+    MentalsUI::LabelledSlider maxReductionSlider;
+    MentalsUI::LabelledFader mixSlider; // dry/wet blend reads more naturally as a fader than a knob
     juce::ToggleButton listenToggle { "Listen" };
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>

@@ -98,7 +98,8 @@ private:
     //==========================================================================
     juce::Label keyLabel, scaleLabel;
     juce::ComboBox keySelector, scaleSelector;
-    MentalsUI::LabelledSlider retuneSpeedSlider, amountSlider, mixSlider;
+    MentalsUI::LabelledSlider retuneSpeedSlider, amountSlider;
+    MentalsUI::LabelledFader mixSlider; // dry/wet blend reads more naturally as a fader than a knob
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> keyAttachment, scaleAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
