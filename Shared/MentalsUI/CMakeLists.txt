@@ -9,7 +9,8 @@ juce_add_binary_data(MentalsSharedBinaryData
         mentals_logo.png)
 
 add_library(MentalsUI STATIC
-    LevelMeterComponent.cpp)
+    LevelMeterComponent.cpp
+    GainReductionMeterComponent.cpp)
 
 target_include_directories(MentalsUI PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 

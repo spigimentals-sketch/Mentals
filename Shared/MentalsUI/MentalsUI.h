@@ -4,6 +4,7 @@
 // this one header rather than the individual pieces below.
 #include "MentalsColours.h"
 #include "LevelMeterComponent.h"
+#include "GainReductionMeterComponent.h"
 #include "SplitterBar.h"
 #include "LabelledSlider.h"
 #include "PopupLauncher.h"
