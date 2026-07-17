@@ -42,6 +42,7 @@ target_link_libraries(MentalsSuite
         MentalsReverbCore
         MentalsLimiterCore
         MentalsGateCore
+        MentalsChorusCore
         juce::juce_audio_utils
         juce::juce_dsp
     PUBLIC

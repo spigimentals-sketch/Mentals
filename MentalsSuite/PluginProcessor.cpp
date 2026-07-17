@@ -4,7 +4,7 @@
 
 namespace
 {
-    constexpr const char* moduleTypeNames[] = { "EQ", "De-esser", "Compressor", "Saturator", "Autotune", "Delay", "Reverb", "Limiter", "Gate" };
+    constexpr const char* moduleTypeNames[] = { "EQ", "De-esser", "Compressor", "Saturator", "Autotune", "Delay", "Reverb", "Limiter", "Gate", "Chorus" };
 }
 
 const char* MentalsSuiteAudioProcessor::getModuleTypeName (int moduleType) noexcept
@@ -25,6 +25,7 @@ std::unique_ptr<juce::AudioProcessor> MentalsSuiteAudioProcessor::createModulePr
         case moduleReverb:     return std::make_unique<MentalsReverbAudioProcessor>();
         case moduleLimiter:    return std::make_unique<MentalsLimiterAudioProcessor>();
         case moduleGate:       return std::make_unique<MentalsGateAudioProcessor>();
+        case moduleChorus:     return std::make_unique<MentalsChorusAudioProcessor>();
         default:               jassertfalse; return nullptr;
     }
 }
