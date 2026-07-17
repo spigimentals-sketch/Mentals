@@ -61,6 +61,7 @@ add_subdirectory(MentalsGate)
 add_subdirectory(MentalsChorus)
 add_subdirectory(MentalsVoxChoir)
 add_subdirectory(MentalsStereoShaper)
+add_subdirectory(MentalsExciterEQ)
 
 # ----------------------------------------------------------------------------
 # Mentals Suite chains the plugins above together in one instance -- added
