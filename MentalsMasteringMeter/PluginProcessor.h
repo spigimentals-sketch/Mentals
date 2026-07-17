@@ -99,75 +99,12 @@ private:
 
     double currentSampleRate = 44100.0;
 
-    //==========================================================================
-    // K-weighting: a high-shelf ("pre-filter", approximating head diffraction
-    // above ~2kHz) cascaded with a highpass ("RLB", approximating reduced
-    // low-frequency sensitivity) -- coefficients recomputed per sample rate
-    // from BS.1770's analog-prototype design equations (not the commonly-
-    // copied 48kHz-only coefficient table), so this measures correctly
-    // whatever rate the host actually runs at.
-    //==========================================================================
-    struct KWeightingFilter
-    {
-        juce::dsp::IIR::Filter<float> shelf, highpass;
-
-        void prepare (double sampleRate)
-        {
-            updateCoefficients (sampleRate);
-            reset();
-        }
-
-        void reset()
-        {
-            shelf.reset();
-            highpass.reset();
-        }
-
-        void updateCoefficients (double sampleRate)
-        {
-            {
-                constexpr double f0 = 1681.9744509555319, gainDb = 3.99984385397, q = 0.7071752369554193;
-                const double k = std::tan (juce::MathConstants<double>::pi * f0 / sampleRate);
-                const double vh = std::pow (10.0, gainDb / 20.0);
-                const double vb = std::pow (vh, 0.4996667741545416);
-                const double a0 = 1.0 + k / q + k * k;
-                juce::dsp::IIR::Coefficients<float>::Ptr coeffs = new juce::dsp::IIR::Coefficients<float> (
-                    (float) ((vh + vb * k / q + k * k) / a0),
-                    (float) (2.0 * (k * k - vh) / a0),
-                    (float) ((vh - vb * k / q + k * k) / a0),
-                    1.0f,
-                    (float) (2.0 * (k * k - 1.0) / a0),
-                    (float) ((1.0 - k / q + k * k) / a0));
-                shelf.coefficients = coeffs;
-            }
-            {
-                constexpr double f0 = 38.13547087613982, q = 0.5003270373238773;
-                const double k = std::tan (juce::MathConstants<double>::pi * f0 / sampleRate);
-                const double a0 = 1.0 + k / q + k * k;
-                juce::dsp::IIR::Coefficients<float>::Ptr coeffs = new juce::dsp::IIR::Coefficients<float> (
-                    (float) (1.0 / a0), (float) (-2.0 / a0), (float) (1.0 / a0),
-                    1.0f,
-                    (float) (2.0 * (k * k - 1.0) / a0),
-                    (float) ((1.0 - k / q + k * k) / a0));
-                highpass.coefficients = coeffs;
-            }
-        }
-
-        float process (float x) noexcept { return highpass.processSample (shelf.processSample (x)); }
-    };
-
-    std::array<KWeightingFilter, 2> kWeighting;
-
-    int samplesPerSubBlock = 4800; // 100ms, recomputed from sample rate in prepareToPlay
-    int subBlockSampleCounter = 0;
-    std::array<double, 2> subBlockSumSquares { 0.0, 0.0 }; // per channel -- BS.1770 averages each channel separately before summing
-
-    // Lock-free ring buffer of 100ms sub-block mean squares (linear, not dB
-    // yet) -- single audio-thread writer, message-thread-only readers.
-    static constexpr int historyCapacity = 18000; // 30 minutes at 100ms resolution
-    std::array<std::atomic<float>, historyCapacity> subBlockMeanSquare {};
-    std::atomic<int> historyWritePos { 0 };
-    std::atomic<int> historyCount { 0 }; // number of valid entries so far, capped at historyCapacity
+    // K-weighting + sub-block accumulation + gating math all live in the
+    // shared MentalsUI::LoudnessDSP::LufsMeter (see that header for the
+    // BS.1770 details) -- Mentals Suite's Master Assistant uses the exact
+    // same class for its own live capture, so there's one implementation of
+    // this correctness-sensitive math, not two that could drift apart.
+    MentalsUI::LoudnessDSP::LufsMeter lufsMeter;
 
     std::atomic<bool> resetRequested { false };
 

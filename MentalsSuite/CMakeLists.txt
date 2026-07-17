@@ -22,7 +22,8 @@ juce_generate_juce_header(MentalsSuite)
 target_sources(MentalsSuite
     PRIVATE
         PluginProcessor.cpp
-        PluginEditor.cpp)
+        PluginEditor.cpp
+        MasterAssistant.cpp)
 
 target_compile_definitions(MentalsSuite
     PUBLIC

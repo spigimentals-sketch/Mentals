@@ -22,6 +22,7 @@
 #include "../MentalsExciterEQ/PluginProcessor.h"
 #include "../MentalsCircuitComp/PluginProcessor.h"
 #include "../MentalsMasteringMeter/PluginProcessor.h"
+#include "MasterAssistant.h"
 
 #include <memory>
 #include <vector>
@@ -140,6 +141,10 @@ public:
     bool isSlotBypassed (int slotId) const noexcept;
     void setSlotBypassed (int slotId, bool shouldBeBypassed);
 
+    // Ozone-style mastering-by-reference, orchestrating the chain's own
+    // modules -- see MasterAssistant.h's class comment.
+    MasterAssistant& getMasterAssistant() noexcept { return masterAssistant; }
+
 private:
     using Node = juce::AudioProcessorGraph::Node;
 
@@ -159,6 +164,8 @@ private:
 
     std::vector<Slot> slots; // empty until the user adds modules; front-to-back signal order
     int nextSlotId = 0;
+
+    MasterAssistant masterAssistant { *this };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MentalsSuiteAudioProcessor)
 };

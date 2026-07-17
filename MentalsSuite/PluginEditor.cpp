@@ -228,15 +228,168 @@ void ChainListComponent::showAddMenu()
 }
 
 //==============================================================================
+// MasterAssistantPanel
+//==============================================================================
+MasterAssistantPanel::MasterAssistantPanel (MentalsSuiteAudioProcessor& proc)
+    : processor (proc)
+{
+    titleLabel.setFont (juce::Font (juce::FontOptions (16.0f, juce::Font::bold)));
+    titleLabel.setColour (juce::Label::textColourId, MentalsUI::Colours::white);
+    addAndMakeVisible (titleLabel);
+
+    hintLabel.setFont (juce::Font (juce::FontOptions (12.0f)));
+    hintLabel.setColour (juce::Label::textColourId, MentalsUI::Colours::slateGray);
+    hintLabel.setJustificationType (juce::Justification::topLeft);
+    addAndMakeVisible (hintLabel);
+
+    for (auto* b : { &loadRefButton, &captureButton, &applyButton })
+    {
+        b->addListener (this);
+        addAndMakeVisible (*b);
+    }
+
+    for (auto* l : { &referenceStatusLabel, &captureStatusLabel })
+    {
+        l->setFont (juce::Font (juce::FontOptions (12.0f)));
+        l->setColour (juce::Label::textColourId, MentalsUI::Colours::white);
+        addAndMakeVisible (*l);
+    }
+
+    applyHintLabel.setFont (juce::Font (juce::FontOptions (11.0f)));
+    applyHintLabel.setColour (juce::Label::textColourId, MentalsUI::Colours::slateGray);
+    addAndMakeVisible (applyHintLabel);
+
+    setSize (360, 250);
+    updateStatusLabels();
+}
+
+MasterAssistantPanel::~MasterAssistantPanel()
+{
+    for (auto* b : { &loadRefButton, &captureButton, &applyButton })
+        b->removeListener (this);
+}
+
+void MasterAssistantPanel::resized()
+{
+    auto g = getLocalBounds().reduced (10);
+
+    titleLabel.setBounds (g.removeFromTop (20));
+    g.removeFromTop (4);
+    hintLabel.setBounds (g.removeFromTop (32));
+    g.removeFromTop (8);
+
+    loadRefButton.setBounds (g.removeFromTop (26));
+    g.removeFromTop (4);
+    referenceStatusLabel.setBounds (g.removeFromTop (18));
+    g.removeFromTop (10);
+
+    captureButton.setBounds (g.removeFromTop (26));
+    g.removeFromTop (4);
+    captureStatusLabel.setBounds (g.removeFromTop (18));
+    g.removeFromTop (10);
+
+    applyButton.setBounds (g.removeFromTop (26));
+    g.removeFromTop (4);
+    applyHintLabel.setBounds (g.removeFromTop (18));
+}
+
+void MasterAssistantPanel::refresh()
+{
+    updateStatusLabels();
+}
+
+void MasterAssistantPanel::buttonClicked (juce::Button* button)
+{
+    auto& assistant = processor.getMasterAssistant();
+
+    if (button == &loadRefButton)
+    {
+        activeFileChooser = std::make_unique<juce::FileChooser> (
+            "Select a reference audio file...", juce::File(), "*.wav;*.aiff;*.mp3;*.flac;*.ogg");
+
+        activeFileChooser->launchAsync (
+            juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+            [this] (const juce::FileChooser& fc)
+            {
+                const auto file = fc.getResult();
+                if (! file.existsAsFile())
+                    return; // user cancelled -- leave whatever was already loaded alone
+
+                lastLoadFailed = ! processor.getMasterAssistant().loadReferenceFile (file);
+                updateStatusLabels();
+            });
+        return;
+    }
+
+    if (button == &captureButton)
+    {
+        assistant.beginCapture();
+        updateStatusLabels();
+        return;
+    }
+
+    if (button == &applyButton)
+    {
+        assistant.applyToChain();
+        updateStatusLabels();
+        if (onApplied)
+            onApplied(); // chain composition may have changed -- see MasterAssistant::ensureModuleInChain
+        return;
+    }
+}
+
+void MasterAssistantPanel::updateStatusLabels()
+{
+    auto& assistant = processor.getMasterAssistant();
+
+    if (! assistant.hasReference())
+        referenceStatusLabel.setText (lastLoadFailed ? "Failed to load -- unsupported or unreadable file"
+                                                       : "No reference loaded yet",
+                                       juce::dontSendNotification);
+    else
+        referenceStatusLabel.setText (
+            "\"" + assistant.getReferenceFileName() + "\"  " + juce::String (assistant.getReferenceLufs(), 1)
+                + " LUFS, crest " + juce::String (assistant.getReferenceCrestDb(), 1)
+                + " dB, corr " + juce::String (assistant.getReferenceCorrelation(), 2),
+            juce::dontSendNotification);
+
+    if (assistant.isCapturing())
+        captureStatusLabel.setText (
+            "Capturing... " + juce::String ((int) (assistant.getCaptureProgress() * 100.0f)) + "% -- keep it playing",
+            juce::dontSendNotification);
+    else if (! assistant.isCaptureReady())
+        captureStatusLabel.setText ("Not captured yet -- play your mix, then click Capture",
+                                     juce::dontSendNotification);
+    else
+        captureStatusLabel.setText (
+            "My mix: " + juce::String (assistant.getCapturedLufs(), 1) + " LUFS, crest "
+                + juce::String (assistant.getCapturedCrestDb(), 1) + " dB, corr "
+                + juce::String (assistant.getCapturedCorrelation(), 2),
+            juce::dontSendNotification);
+
+    applyButton.setEnabled (assistant.canApply());
+    applyHintLabel.setText (assistant.canApply()
+                                 ? "Nudges EQ/Comp/Width/Limiter toward the reference"
+                                 : "Load a reference and capture your mix first",
+                             juce::dontSendNotification);
+}
+
+//==============================================================================
 // MentalsSuiteAudioProcessorEditor
 //==============================================================================
 MentalsSuiteAudioProcessorEditor::MentalsSuiteAudioProcessorEditor (MentalsSuiteAudioProcessor& p)
-    : juce::AudioProcessorEditor (&p), processor (p), chainList (p)
+    : juce::AudioProcessorEditor (&p), processor (p), masterAssistantPanel (p), chainList (p)
 {
     productNameLabel.setText ("MENTALS SUITE", juce::dontSendNotification);
     productNameLabel.setFont (juce::Font (juce::FontOptions (20.0f, juce::Font::bold)));
     productNameLabel.setColour (juce::Label::textColourId, MentalsUI::Colours::white);
     addAndMakeVisible (productNameLabel);
+
+    masterAssistantButton.setColour (juce::TextButton::buttonColourId, MentalsUI::Colours::slateGrayDark);
+    masterAssistantButton.setColour (juce::TextButton::textColourOffId, MentalsUI::Colours::white);
+    masterAssistantButton.addListener (this);
+    addAndMakeVisible (masterAssistantButton);
+    masterAssistantPanel.onApplied = [this] { chainList.refreshFromProcessor(); };
 
     addAndMakeVisible (chainList);
     chainList.onModuleSelected = [this] (int slotId) { showModule (slotId); };
@@ -256,11 +409,29 @@ MentalsSuiteAudioProcessorEditor::MentalsSuiteAudioProcessorEditor (MentalsSuite
 
     const auto initialSlots = processor.getChainSlots();
     showModule (initialSlots.empty() ? -1 : initialSlots.front().slotId);
+
+    startTimerHz (10); // refreshes Master Assistant's capture-progress readout while its popup is open
 }
 
 MentalsSuiteAudioProcessorEditor::~MentalsSuiteAudioProcessorEditor()
 {
+    stopTimer();
+    masterAssistantButton.removeListener (this);
     moduleViewport.setViewedComponent (nullptr, false);
+}
+
+void MentalsSuiteAudioProcessorEditor::buttonClicked (juce::Button* button)
+{
+    if (button == &masterAssistantButton)
+    {
+        masterAssistantPanel.refresh();
+        MentalsUI::launchPopup (masterAssistantPanel, masterAssistantButton);
+    }
+}
+
+void MentalsSuiteAudioProcessorEditor::timerCallback()
+{
+    masterAssistantPanel.refresh();
 }
 
 void MentalsSuiteAudioProcessorEditor::showModule (int slotId)
@@ -326,7 +497,9 @@ void MentalsSuiteAudioProcessorEditor::resized()
     auto bounds = getLocalBounds();
 
     auto topBar = bounds.removeFromTop (topBarHeight);
-    productNameLabel.setBounds (topBar.reduced (10, 0));
+    topBar = topBar.reduced (10, 4);
+    masterAssistantButton.setBounds (topBar.removeFromRight (150));
+    productNameLabel.setBounds (topBar);
 
     chainList.setBounds (bounds.removeFromLeft (chainListWidth));
     moduleViewport.setBounds (bounds);

@@ -53,6 +53,7 @@ void MentalsSuiteAudioProcessor::prepareToPlay (double sampleRate, int samplesPe
     graph.setPlayConfigDetails (getMainBusNumInputChannels(), getMainBusNumOutputChannels(), sampleRate, samplesPerBlock);
     graph.prepareToPlay (sampleRate, samplesPerBlock);
     rebuildConnections();
+    masterAssistant.prepare (sampleRate);
 }
 
 void MentalsSuiteAudioProcessor::releaseResources()
@@ -69,6 +70,7 @@ bool MentalsSuiteAudioProcessor::isBusesLayoutSupported (const BusesLayout& layo
 void MentalsSuiteAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
     graph.processBlock (buffer, midi);
+    masterAssistant.processOutputBlock (buffer); // final chain output -- see MasterAssistant.h
 }
 
 juce::AudioProcessorEditor* MentalsSuiteAudioProcessor::createEditor()

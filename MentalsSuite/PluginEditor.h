@@ -101,13 +101,58 @@ private:
 };
 
 //==============================================================================
+// Master Assistant's popup panel content -- Load Reference / Capture My Mix
+// / Apply, plus a status readout of each side's measured LUFS/crest/
+// correlation once available. A plain (non-heap-owned) member reused across
+// openings, following the same pattern as Mentals Multimode EQ's own
+// EQ Match / AI Assist / Settings popups (see MentalsUI::launchPopup).
+//==============================================================================
+class MasterAssistantPanel : public juce::Component,
+                              private juce::Button::Listener
+{
+public:
+    explicit MasterAssistantPanel (MentalsSuiteAudioProcessor& proc);
+    ~MasterAssistantPanel() override;
+
+    void resized() override;
+    void refresh(); // re-reads MasterAssistant's current state into the labels/buttons
+
+    // Called after Apply -- the chain's composition may have changed (see
+    // MasterAssistant::ensureModuleInChain), so the outer editor needs to
+    // refresh its chain list.
+    std::function<void()> onApplied;
+
+private:
+    void buttonClicked (juce::Button*) override;
+    void updateStatusLabels();
+
+    MentalsSuiteAudioProcessor& processor;
+
+    juce::Label titleLabel { {}, "Master Assistant" };
+    juce::Label hintLabel { {}, "Load a reference track, then Capture a few\nseconds of your own mix playing to compare." };
+    juce::TextButton loadRefButton { "Load Reference..." };
+    juce::Label referenceStatusLabel;
+    juce::TextButton captureButton { "Capture My Mix" };
+    juce::Label captureStatusLabel;
+    juce::TextButton applyButton { "Apply" };
+    juce::Label applyHintLabel;
+
+    std::unique_ptr<juce::FileChooser> activeFileChooser;
+    bool lastLoadFailed = false;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MasterAssistantPanel)
+};
+
+//==============================================================================
 // Mentals Suite's editor: the chain list on the left (add/remove/reorder/
 // bypass/select), and the currently-selected instance's own, unmodified
 // editor filling the rest of the window -- each module's UI is exactly what
 // its standalone plugin shows, just hosted here instead. Shows a
 // placeholder message when the chain is empty (nothing added yet).
 //==============================================================================
-class MentalsSuiteAudioProcessorEditor : public juce::AudioProcessorEditor
+class MentalsSuiteAudioProcessorEditor : public juce::AudioProcessorEditor,
+                                          private juce::Button::Listener,
+                                          private juce::Timer
 {
 public:
     explicit MentalsSuiteAudioProcessorEditor (MentalsSuiteAudioProcessor&);
@@ -119,11 +164,15 @@ public:
 private:
     void showModule (int slotId);
     void removeModule (int slotId);
+    void buttonClicked (juce::Button*) override;
+    void timerCallback() override;
     void parentHierarchyChanged() override { MentalsUI::enableMaximiseButtonIfStandalone (*this); }
 
     MentalsSuiteAudioProcessor& processor;
 
     juce::Label productNameLabel;
+    juce::TextButton masterAssistantButton { "Master Assistant" };
+    MasterAssistantPanel masterAssistantPanel;
     ChainListComponent chainList;
     juce::Viewport moduleViewport;
     juce::Label emptyStateLabel { {}, "No plugins in the chain yet -- click \"+ Add Module\" to begin." };
