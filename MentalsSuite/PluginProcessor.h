@@ -18,6 +18,7 @@
 #include "../MentalsGate/PluginProcessor.h"
 #include "../MentalsChorus/PluginProcessor.h"
 #include "../MentalsVoxChoir/PluginProcessor.h"
+#include "../MentalsStereoShaper/PluginProcessor.h"
 
 #include <memory>
 #include <vector>
@@ -97,6 +98,7 @@ public:
         moduleGate,
         moduleChorus,
         moduleVoxChoir,
+        moduleStereoShaper,
         numModuleTypes
     };
 
