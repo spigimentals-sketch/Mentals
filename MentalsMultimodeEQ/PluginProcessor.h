@@ -600,6 +600,16 @@ public:
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
+    // Ships a starting-point tonal preset for every major instrument/vocal
+    // type (see the .cpp for the full list) the first time the plugin ever
+    // runs -- writes them straight into getPresetsDirectory() via
+    // savePreset() (same path a user's own saved preset takes), so they
+    // show up in the preset dropdown alongside anything the user saves
+    // afterwards. Never overwrites an existing preset directory (checked
+    // via getAvailablePresetNames()), so a user who's already saved
+    // anything of their own is left alone.
+    void seedFactoryPresetsIfMissing();
+
     // Shared by getStateInformation()/setStateInformation() and the preset
     // save/load methods, so both write and read the exact same XML shape.
     std::unique_ptr<juce::XmlElement> buildStateXml();

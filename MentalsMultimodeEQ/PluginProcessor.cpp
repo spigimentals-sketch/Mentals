@@ -63,6 +63,8 @@ MultiModeEQAudioProcessor::MultiModeEQAudioProcessor()
     monoScratchBuffer.assign ((size_t) maxExpectedBlockSize, 0.0f);
     for (auto& buf : bandScratchBuffers)
         buf.assign ((size_t) maxExpectedBlockSize, 0.0f);
+
+    seedFactoryPresetsIfMissing();
 }
 
 //==============================================================================
@@ -1448,4 +1450,205 @@ void MultiModeEQAudioProcessor::resetToDefault()
         param->setValueNotifyingHost (param->getDefaultValue());
 
     clearAllMidiLearn();
+}
+
+//==============================================================================
+// Factory presets: one tonal starting point per major instrument/vocal type,
+// each a handful of Parametric moves (every band not listed is switched off,
+// not just left at 0dB, so the graph shows exactly the shape being applied
+// rather than ten flat, cluttering bands). Frequencies/gains/Qs below follow
+// standard mixing-engineering starting points (rumble/plosive high-pass,
+// mud cut around 200-500Hz, a presence bump somewhere in 2-5kHz, an air
+// shelf above 8kHz) adapted per source -- a starting point to dial in
+// further, not a finished mix.
+//==============================================================================
+void MultiModeEQAudioProcessor::seedFactoryPresetsIfMissing()
+{
+    if (! getAvailablePresetNames().isEmpty())
+        return;
+
+    struct Move { int band; float freqHz; float gainDb; float q; FilterShape shape; };
+
+    auto applyPreset = [this] (const juce::String& name, std::initializer_list<Move> moves)
+    {
+        resetToDefault();
+        for (auto& band : bands)
+            band.enabledParam->setValueNotifyingHost (0.0f);
+
+        for (auto& m : moves)
+        {
+            auto& band = bands[(size_t) m.band];
+            band.enabledParam->setValueNotifyingHost (1.0f);
+            band.freqParam->setValueNotifyingHost (band.freqParam->convertTo0to1 (m.freqHz));
+            band.gainParam->setValueNotifyingHost (band.gainParam->convertTo0to1 (m.gainDb));
+            band.qParam->setValueNotifyingHost (band.qParam->convertTo0to1 (m.q));
+            band.filterShapeParam->setValueNotifyingHost (band.filterShapeParam->convertTo0to1 ((float) (int) m.shape));
+        }
+
+        savePreset (name);
+    };
+
+    // ---- Vocals -----------------------------------------------------------------
+    applyPreset ("Vocal - Male", {
+        { 0, 90.0f,     0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 300.0f,   -2.5f, 1.0f, FilterShape::Bell },
+        { 2, 3000.0f,   3.0f, 1.0f, FilterShape::Bell },
+        { 3, 10000.0f,  2.0f, 0.7f, FilterShape::HighShelf },
+    });
+
+    applyPreset ("Vocal - Female", {
+        { 0, 110.0f,    0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 400.0f,   -2.0f, 1.0f, FilterShape::Bell },
+        { 2, 5000.0f,   2.5f, 1.2f, FilterShape::Bell },
+        { 3, 12000.0f,  2.0f, 0.7f, FilterShape::HighShelf },
+    });
+
+    applyPreset ("Vocal - Backing Choir", {
+        { 0, 150.0f,    0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 500.0f,   -2.0f, 1.0f, FilterShape::Bell },
+        { 2, 3000.0f,  -1.5f, 1.0f, FilterShape::Bell },
+        { 3, 10000.0f,  1.5f, 0.7f, FilterShape::HighShelf },
+    });
+
+    applyPreset ("Vocal - Rap Hip-Hop", {
+        { 0, 90.0f,     0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 150.0f,    1.5f, 1.0f, FilterShape::Bell },
+        { 2, 350.0f,   -3.0f, 1.1f, FilterShape::Bell },
+        { 3, 3500.0f,   3.5f, 1.0f, FilterShape::Bell },
+        { 4, 10000.0f,  2.0f, 0.7f, FilterShape::HighShelf },
+    });
+
+    // ---- Drums --------------------------------------------------------------------
+    applyPreset ("Drums - Kick", {
+        { 0, 30.0f,     0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 60.0f,     4.0f, 1.0f, FilterShape::Bell },
+        { 2, 350.0f,   -4.0f, 1.2f, FilterShape::Bell },
+        { 3, 3500.0f,   3.0f, 1.0f, FilterShape::Bell },
+    });
+
+    applyPreset ("Drums - Snare", {
+        { 0, 200.0f,    2.5f, 1.0f, FilterShape::Bell },
+        { 1, 450.0f,   -2.5f, 1.1f, FilterShape::Bell },
+        { 2, 3500.0f,   3.5f, 1.0f, FilterShape::Bell },
+        { 3, 8000.0f,   2.0f, 0.7f, FilterShape::HighShelf },
+    });
+
+    applyPreset ("Drums - Hi-Hat Cymbals", {
+        { 0, 400.0f,    0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 3000.0f,  -1.5f, 1.0f, FilterShape::Bell },
+        { 2, 10000.0f,  3.0f, 0.7f, FilterShape::HighShelf },
+    });
+
+    applyPreset ("Drums - Toms", {
+        { 0, 50.0f,     0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 120.0f,    3.0f, 1.0f, FilterShape::Bell },
+        { 2, 400.0f,   -2.5f, 1.1f, FilterShape::Bell },
+        { 3, 4500.0f,   2.5f, 1.0f, FilterShape::Bell },
+    });
+
+    applyPreset ("Drums - Full Kit Overheads", {
+        { 0, 60.0f,     0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 100.0f,    1.5f, 1.0f, FilterShape::Bell },
+        { 2, 400.0f,   -2.0f, 1.0f, FilterShape::Bell },
+        { 3, 5000.0f,   1.5f, 1.0f, FilterShape::Bell },
+        { 4, 10000.0f,  2.0f, 0.7f, FilterShape::HighShelf },
+    });
+
+    // ---- Bass -----------------------------------------------------------------------
+    applyPreset ("Bass - Electric", {
+        { 0, 35.0f,     0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 90.0f,     3.0f, 1.0f, FilterShape::Bell },
+        { 2, 300.0f,   -3.0f, 1.2f, FilterShape::Bell },
+        { 3, 900.0f,    1.5f, 1.0f, FilterShape::Bell },
+        { 4, 2500.0f,   2.0f, 1.0f, FilterShape::Bell },
+    });
+
+    applyPreset ("Bass - Upright Double", {
+        { 0, 30.0f,     0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 80.0f,     2.5f, 1.0f, FilterShape::Bell },
+        { 2, 220.0f,   -3.0f, 1.3f, FilterShape::Bell },
+        { 3, 2000.0f,   1.5f, 1.0f, FilterShape::Bell },
+    });
+
+    applyPreset ("Bass - Sub 808", {
+        { 0, 25.0f,     0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 50.0f,     4.0f, 1.0f, FilterShape::Bell },
+        { 2, 250.0f,   -3.0f, 1.1f, FilterShape::Bell },
+        { 3, 5000.0f,  -3.0f, 0.7f, FilterShape::HighShelf },
+    });
+
+    // ---- Guitars --------------------------------------------------------------------
+    applyPreset ("Guitar - Acoustic", {
+        { 0, 90.0f,     0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 250.0f,   -2.5f, 1.1f, FilterShape::Bell },
+        { 2, 3500.0f,   2.0f, 1.0f, FilterShape::Bell },
+        { 3, 11000.0f,  2.5f, 0.7f, FilterShape::HighShelf },
+    });
+
+    applyPreset ("Guitar - Electric Clean", {
+        { 0, 100.0f,    0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 350.0f,   -2.0f, 1.1f, FilterShape::Bell },
+        { 2, 3000.0f,   2.0f, 1.0f, FilterShape::Bell },
+        { 3, 8000.0f,   1.5f, 0.7f, FilterShape::HighShelf },
+    });
+
+    applyPreset ("Guitar - Electric Distorted", {
+        { 0, 120.0f,    0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 450.0f,   -3.0f, 1.2f, FilterShape::Bell },
+        { 2, 1800.0f,   2.5f, 1.0f, FilterShape::Bell },
+        { 3, 7000.0f,  -2.0f, 1.0f, FilterShape::Bell },
+    });
+
+    // ---- Keys and synths --------------------------------------------------------
+    applyPreset ("Piano - Acoustic", {
+        { 0, 40.0f,     0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 250.0f,   -2.0f, 1.0f, FilterShape::Bell },
+        { 2, 3000.0f,   2.0f, 1.0f, FilterShape::Bell },
+        { 3, 10000.0f,  1.5f, 0.7f, FilterShape::HighShelf },
+    });
+
+    applyPreset ("Keys - Electric Piano Rhodes", {
+        { 0, 60.0f,     0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 180.0f,    1.5f, 1.0f, FilterShape::Bell },
+        { 2, 500.0f,   -1.5f, 1.0f, FilterShape::Bell },
+        { 3, 3500.0f,   2.0f, 1.0f, FilterShape::Bell },
+        { 4, 9000.0f,   1.5f, 0.7f, FilterShape::HighShelf },
+    });
+
+    applyPreset ("Synth - Lead", {
+        { 0, 80.0f,     0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 350.0f,   -1.5f, 1.0f, FilterShape::Bell },
+        { 2, 2500.0f,   2.5f, 1.0f, FilterShape::Bell },
+        { 3, 10000.0f,  2.0f, 0.7f, FilterShape::HighShelf },
+    });
+
+    applyPreset ("Synth - Pad", {
+        { 0, 100.0f,    0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 900.0f,   -2.0f, 0.8f, FilterShape::Bell },
+        { 2, 12000.0f,  2.5f, 0.7f, FilterShape::HighShelf },
+    });
+
+    // ---- Orchestral / horns -------------------------------------------------------
+    applyPreset ("Strings - Section", {
+        { 0, 100.0f,    0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 350.0f,   -1.5f, 1.0f, FilterShape::Bell },
+        { 2, 3500.0f,   2.0f, 1.0f, FilterShape::Bell },
+        { 3, 10000.0f,  2.0f, 0.7f, FilterShape::HighShelf },
+    });
+
+    applyPreset ("Brass - Section", {
+        { 0, 100.0f,    0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 600.0f,   -2.5f, 1.2f, FilterShape::Bell },
+        { 2, 3000.0f,   2.5f, 1.0f, FilterShape::Bell },
+        { 3, 8000.0f,   1.5f, 0.7f, FilterShape::HighShelf },
+    });
+
+    applyPreset ("Woodwinds", {
+        { 0, 120.0f,    0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 500.0f,   -1.5f, 1.0f, FilterShape::Bell },
+        { 2, 4000.0f,   2.0f, 1.0f, FilterShape::Bell },
+        { 3, 9000.0f,   1.5f, 0.7f, FilterShape::HighShelf },
+    });
+
+    resetToDefault();
 }
