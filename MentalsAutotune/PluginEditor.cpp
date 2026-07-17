@@ -525,7 +525,7 @@ void MentalsAutotuneAudioProcessorEditor::resized()
 
     constexpr int topBarHeight   = 40;
     constexpr int splitterHeight = 8;
-    constexpr int panelHeight    = 170; // Key/Scale row above the knobs, like Saturator's Type row
+    constexpr int panelHeight    = 250; // Key/Scale row above the knobs, like Saturator's Type row
 
     auto topBarArea = area.removeFromTop (topBarHeight);
     {
@@ -571,5 +571,5 @@ void MentalsAutotuneAudioProcessorEditor::resized()
                                            &mixSlider.slider, &outputMeter };
     const int cellWidth = knobArea.getWidth() / knobs.size();
     for (auto* knob : knobs)
-        knob->setBounds (knobArea.removeFromLeft (cellWidth).reduced (8, 0));
+        knob->setBounds (knobArea.removeFromLeft (cellWidth).reduced (4, 0));
 }

@@ -210,7 +210,7 @@ void MentalsDelayAudioProcessorEditor::resized()
 
     constexpr int topBarHeight   = 40;
     constexpr int splitterHeight = 8;
-    constexpr int panelHeight    = 140;
+    constexpr int panelHeight    = 220;
 
     auto topBarArea = area.removeFromTop (topBarHeight);
     {
@@ -240,7 +240,7 @@ void MentalsDelayAudioProcessorEditor::resized()
                                            &lowCutSlider.slider, &highCutSlider.slider, &outputMeter };
     const int cellWidth = p.getWidth() / (knobs.size() + 1); // +1 reserves a cell for the Ping-Pong toggle
     for (auto* knob : knobs)
-        knob->setBounds (p.removeFromLeft (cellWidth).reduced (8, 0));
+        knob->setBounds (p.removeFromLeft (cellWidth).reduced (4, 0));
 
     pingPongToggle.setBounds (p.reduced (8, 0).withHeight (26).withY (p.getY() + p.getHeight() / 2 - 13));
 }

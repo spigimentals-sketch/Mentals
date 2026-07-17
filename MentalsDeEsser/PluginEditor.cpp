@@ -129,7 +129,7 @@ MentalsDeEsserAudioProcessorEditor::MentalsDeEsserAudioProcessorEditor (MentalsD
         processor.apvts, "listen", listenToggle);
 
     setResizable (true, true);
-    setResizeLimits (620, 460, 1300, 900);
+    setResizeLimits (620, 560, 1300, 900);
     setSize (860, 600);
 }
 
@@ -215,7 +215,7 @@ void MentalsDeEsserAudioProcessorEditor::resized()
 
     constexpr int topBarHeight   = 40;
     constexpr int splitterHeight = 8;
-    constexpr int panelHeight    = 250; // two knob rows, like Compressor's layout
+    constexpr int panelHeight    = 380; // two knob rows, like Compressor's layout
 
     auto topBarArea = area.removeFromTop (topBarHeight);
     {
@@ -249,14 +249,14 @@ void MentalsDeEsserAudioProcessorEditor::resized()
                                                &attackSlider.slider, &releaseSlider.slider };
     const int cellWidth1 = row1.getWidth() / row1Knobs.size();
     for (auto* knob : row1Knobs)
-        knob->setBounds (row1.removeFromLeft (cellWidth1).reduced (8, 0));
+        knob->setBounds (row1.removeFromLeft (cellWidth1).reduced (4, 0));
 
     row2.removeFromTop (20);
     juce::Array<juce::Component*> row2Knobs { &maxReductionSlider.slider, &mixSlider.slider,
                                                &gainReductionMeter, &outputMeter };
     const int cellWidth2 = row2.getWidth() / (row2Knobs.size() + 1); // +1 reserves a cell for the Listen toggle
     for (auto* knob : row2Knobs)
-        knob->setBounds (row2.removeFromLeft (cellWidth2).reduced (8, 0));
+        knob->setBounds (row2.removeFromLeft (cellWidth2).reduced (4, 0));
 
     listenToggle.setBounds (row2.reduced (8, 0).withHeight (26).withY (row2.getY() + row2.getHeight() / 2 - 13));
 }

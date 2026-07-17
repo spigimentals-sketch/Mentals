@@ -209,7 +209,7 @@ void MentalsExciterEQAudioProcessorEditor::resized()
 
     constexpr int topBarHeight   = 40;
     constexpr int splitterHeight = 8;
-    constexpr int panelHeight    = 140;
+    constexpr int panelHeight    = 220;
 
     auto topBarArea = area.removeFromTop (topBarHeight);
     {
@@ -237,5 +237,5 @@ void MentalsExciterEQAudioProcessorEditor::resized()
                                            &airGainSlider.slider, &mixSlider.slider, &outputMeter };
     const int cellWidth = p.getWidth() / knobs.size();
     for (auto* knob : knobs)
-        knob->setBounds (p.removeFromLeft (cellWidth).reduced (8, 0));
+        knob->setBounds (p.removeFromLeft (cellWidth).reduced (4, 0));
 }

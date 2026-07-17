@@ -208,7 +208,7 @@ void MentalsSaturatorAudioProcessorEditor::resized()
 
     constexpr int topBarHeight   = 40;
     constexpr int splitterHeight = 8;
-    constexpr int panelHeight    = 170; // taller than Delay/Reverb's 140 to fit the extra Type row above the knobs
+    constexpr int panelHeight    = 250; // taller than Delay/Reverb's 220 to fit the extra Type row above the knobs
 
     auto topBarArea = area.removeFromTop (topBarHeight);
     {
@@ -245,5 +245,5 @@ void MentalsSaturatorAudioProcessorEditor::resized()
                                            &outputGainSlider.slider, &mixSlider.slider, &outputMeter };
     const int cellWidth = knobArea.getWidth() / knobs.size();
     for (auto* knob : knobs)
-        knob->setBounds (knobArea.removeFromLeft (cellWidth).reduced (8, 0));
+        knob->setBounds (knobArea.removeFromLeft (cellWidth).reduced (4, 0));
 }
