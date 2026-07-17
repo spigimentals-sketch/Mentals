@@ -47,6 +47,7 @@ target_link_libraries(MentalsSuite
         MentalsStereoShaperCore
         MentalsExciterEQCore
         MentalsCircuitCompCore
+        MentalsMasteringMeterCore
         juce::juce_audio_utils
         juce::juce_dsp
     PUBLIC

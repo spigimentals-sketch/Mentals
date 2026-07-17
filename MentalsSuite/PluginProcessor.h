@@ -21,6 +21,7 @@
 #include "../MentalsStereoShaper/PluginProcessor.h"
 #include "../MentalsExciterEQ/PluginProcessor.h"
 #include "../MentalsCircuitComp/PluginProcessor.h"
+#include "../MentalsMasteringMeter/PluginProcessor.h"
 
 #include <memory>
 #include <vector>
@@ -103,6 +104,7 @@ public:
         moduleStereoShaper,
         moduleExciterEQ,
         moduleCircuitComp,
+        moduleMasteringMeter,
         numModuleTypes
     };
 
