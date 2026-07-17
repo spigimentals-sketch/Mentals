@@ -6,6 +6,7 @@
 #include "MentalsLookAndFeel.h"
 #include "LevelMeterComponent.h"
 #include "GainReductionMeterComponent.h"
+#include "VuMeterComponent.h"
 #include "SplitterBar.h"
 #include "LabelledSlider.h"
 #include "LabelledFader.h"

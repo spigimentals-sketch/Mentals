@@ -20,6 +20,7 @@
 #include "../MentalsVoxChoir/PluginProcessor.h"
 #include "../MentalsStereoShaper/PluginProcessor.h"
 #include "../MentalsExciterEQ/PluginProcessor.h"
+#include "../MentalsCircuitComp/PluginProcessor.h"
 
 #include <memory>
 #include <vector>
@@ -101,6 +102,7 @@ public:
         moduleVoxChoir,
         moduleStereoShaper,
         moduleExciterEQ,
+        moduleCircuitComp,
         numModuleTypes
     };
 
