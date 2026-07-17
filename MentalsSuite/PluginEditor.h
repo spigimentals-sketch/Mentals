@@ -8,15 +8,17 @@
 #include <vector>
 
 //==============================================================================
-// One row in the chain list, one per instance currently in the chain
-// (several rows can show the same module type, e.g. "EQ 1"/"EQ 2"): its
-// display name, a Bypass toggle (stays in the chain but passes through
-// unprocessed), and a Remove button (takes it out of the chain and destroys
-// it for good -- see ChainListComponent's "+ Add" button for adding a fresh
-// instance of any type back in). Acts as a tab selector (click to view that
-// instance) and a drag handle (drag to move it earlier/later in the signal
-// chain). A row's slotId never changes -- only its on-screen position does,
-// as the chain is reordered.
+// One card in the module rack -- a horizontal strip of these across the top
+// of the window, Ozone-style, one per instance currently in the chain
+// (several cards can show the same module type, e.g. "EQ 1"/"EQ 2"): a
+// small glyph identifying what kind of module it is, its display name, a
+// power toggle (lit electric-blue = active; dim = bypassed, staying in the
+// chain but passing through unprocessed), and a Remove button (takes it out
+// of the chain and destroys it for good -- see ChainListComponent's "+" card
+// for adding a fresh instance of any type back in). Acts as a tab selector
+// (click to view that instance) and a drag handle (drag left/right to move
+// it earlier/later in the signal chain). A card's slotId never changes --
+// only its on-screen position does, as the chain is reordered.
 //==============================================================================
 class ChainListComponent;
 
@@ -41,22 +43,25 @@ private:
     ChainListComponent& owner;
     MentalsSuiteAudioProcessor& processor;
     juce::String displayName;
-    juce::ToggleButton bypassButton { "Bypass" };
-    juce::TextButton removeButton { "Remove" };
-    int dragStartMouseY = 0, dragStartComponentY = 0;
+    juce::TextButton powerToggle { {} };
+    juce::TextButton removeButton { "x" };
+    int dragStartMouseX = 0, dragStartComponentX = 0;
     bool isDragging = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChainRowComponent)
 };
 
 //==============================================================================
-// Vertical list of rows, one per instance currently in the chain (possibly
-// none, possibly several of the same module type), laid out in the
-// processor's current chain order, plus an "+ Add Module" button that opens
-// a menu of every module type -- always all of them, since any type
-// can be added more than once. Dragging a row past a neighbour reorders the
-// underlying chain live (see MentalsSuiteAudioProcessor::setChainOrder());
-// clicking one without dragging selects it for viewing.
+// Horizontal rack of cards, one per instance currently in the chain
+// (possibly none, possibly several of the same module type), laid out
+// left-to-right in the processor's current chain order, plus a "+" card
+// that opens a menu of every module type -- always all of them, since any
+// type can be added more than once. Sized to fit its own content (grows
+// wider as modules are added) and hosted inside the outer editor's
+// horizontally-scrolling rackViewport. Dragging a card past a neighbour
+// reorders the underlying chain live (see
+// MentalsSuiteAudioProcessor::setChainOrder()); clicking one without
+// dragging selects it for viewing.
 //==============================================================================
 class ChainListComponent : public juce::Component
 {
@@ -65,15 +70,15 @@ public:
 
     void resized() override;
 
-    // Called by a row on drag/click -- slotId identifies which row.
-    void rowDragged (int slotId, int newScreenY);
+    // Called by a card on drag/click -- slotId identifies which card.
+    void rowDragged (int slotId, int newScreenX);
     void rowDragEnded();
     void rowClicked (int slotId);
     void rowRemoveRequested (int slotId);
 
     // Re-reads the processor's current chain membership/order (e.g. after
-    // an add/remove, or after loading saved state) and rebuilds the rows.
-    // NOT called mid-drag -- dragging only reorders the existing rows.
+    // an add/remove, or after loading saved state) and rebuilds the cards.
+    // NOT called mid-drag -- dragging only reorders the existing cards.
     void refreshFromProcessor();
 
     // Called with the slot that should now be shown, or -1 if the chain is
@@ -84,8 +89,9 @@ public:
     std::function<void (int)> onModuleRemoveRequested;
     int selectedSlotId = -1;
 
-    static constexpr int rowHeight = 56;
-    static constexpr int addButtonHeight = 32;
+    static constexpr int cardWidth = 132;
+    static constexpr int cardHeight = 96;
+    static constexpr int addCardWidth = 72;
 
 private:
     void layoutRows (int excludeSlotId = -1);
@@ -95,7 +101,7 @@ private:
     MentalsSuiteAudioProcessor& processor;
     std::vector<std::unique_ptr<ChainRowComponent>> rows; // parallel to visualOrder
     std::vector<int> visualOrder; // slot IDs, in chain order
-    juce::TextButton addButton { "+ Add Module" };
+    juce::TextButton addButton { "+" };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChainListComponent)
 };
@@ -144,11 +150,13 @@ private:
 };
 
 //==============================================================================
-// Mentals Suite's editor: the chain list on the left (add/remove/reorder/
-// bypass/select), and the currently-selected instance's own, unmodified
-// editor filling the rest of the window -- each module's UI is exactly what
-// its standalone plugin shows, just hosted here instead. Shows a
-// placeholder message when the chain is empty (nothing added yet).
+// Mentals Suite's editor: an Ozone-style horizontal module rack across the
+// top (add/remove/reorder/bypass/select, scrolling sideways once the chain
+// outgrows the window) below a dark title bar, and the currently-selected
+// instance's own, unmodified editor filling the rest of the window -- each
+// module's UI is exactly what its standalone plugin shows, just hosted here
+// instead. Shows a placeholder message when the chain is empty (nothing
+// added yet).
 //==============================================================================
 class MentalsSuiteAudioProcessorEditor : public juce::AudioProcessorEditor,
                                           private juce::Button::Listener,
@@ -170,20 +178,26 @@ private:
 
     MentalsSuiteAudioProcessor& processor;
 
+    juce::ImageComponent logoImage;
     juce::Label productNameLabel;
+    juce::Label chainSummaryLabel; // "N modules" subtitle under the wordmark, Ozone-title-bar-style
     juce::TextButton masterAssistantButton { "Master Assistant" };
     MasterAssistantPanel masterAssistantPanel;
+
     ChainListComponent chainList;
+    juce::Viewport rackViewport; // horizontal-only -- hosts chainList, scrolls once the rack outgrows the window
+    MentalsUI::SplitterBar splitter;
     juce::Viewport moduleViewport;
-    juce::Label emptyStateLabel { {}, "No plugins in the chain yet -- click \"+ Add Module\" to begin." };
+    juce::Label emptyStateLabel { {}, "No plugins in the chain yet -- click \"+\" to begin." };
 
     // Keyed by slotId rather than module type, since several instances of
     // the same type can now coexist, each with its own independent editor.
     std::map<int, std::unique_ptr<juce::AudioProcessorEditor>> moduleEditors;
     int currentlyShownSlotId = -1;
 
-    static constexpr int chainListWidth = 220;
-    static constexpr int topBarHeight = 40;
+    static constexpr int topBarHeight = 56;
+    static constexpr int rackHeight = ChainListComponent::cardHeight + 16;
+    static constexpr int splitterHeight = 6;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MentalsSuiteAudioProcessorEditor)
 };

@@ -1,7 +1,188 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "BinaryData.h"
 #include <algorithm>
 #include <array>
+
+namespace
+{
+    //==========================================================================
+    // Small representative glyph per module type, drawn in a single accent
+    // colour -- deliberately simple line-art rather than literal icons, so
+    // every card reads as one family (matching this project's one-accent-
+    // colour convention, see MentalsUI::Colours) while still being tellable
+    // apart from across the rack at a glance.
+    //==========================================================================
+    void drawModuleGlyph (juce::Graphics& g, juce::Rectangle<float> b, int moduleType, juce::Colour colour)
+    {
+        using Module = MentalsSuiteAudioProcessor;
+        g.setColour (colour);
+        const juce::PathStrokeType stroke (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded);
+
+        const float x0 = b.getX(), y0 = b.getY(), x1 = b.getRight(), y1 = b.getBottom();
+        const float w = b.getWidth(), h = b.getHeight();
+        const float midY = b.getCentreY();
+        juce::Path p;
+
+        switch (moduleType)
+        {
+            case Module::moduleEQ:
+            case Module::moduleExciterEQ:
+            {
+                p.startNewSubPath (x0, midY + h * 0.18f);
+                p.cubicTo (x0 + w * 0.25f, midY - h * 0.35f, x0 + w * 0.35f, midY - h * 0.35f, x0 + w * 0.5f, midY);
+                p.cubicTo (x0 + w * 0.65f, midY + h * 0.3f, x0 + w * 0.75f, midY + h * 0.3f, x1, midY - h * 0.1f);
+                g.strokePath (p, stroke);
+                break;
+            }
+            case Module::moduleCompressor:
+            case Module::moduleCircuitComp:
+            {
+                const float barW = w * 0.16f;
+                const float heights[3] = { h * 0.75f, h * 0.5f, h * 0.32f };
+                for (int i = 0; i < 3; ++i)
+                {
+                    const float bx = x0 + w * (0.14f + i * 0.3f);
+                    g.fillRoundedRectangle (bx, y1 - heights[(size_t) i], barW, heights[(size_t) i], 1.0f);
+                }
+                g.setColour (colour.withAlpha (0.55f));
+                g.drawHorizontalLine ((int) midY, x0, x1);
+                break;
+            }
+            case Module::moduleSaturator:
+            {
+                p.startNewSubPath (x0, midY);
+                p.lineTo (x0 + w * 0.28f, midY);
+                p.lineTo (x0 + w * 0.28f, y0 + h * 0.18f);
+                p.lineTo (x0 + w * 0.5f, y0 + h * 0.18f);
+                p.lineTo (x0 + w * 0.5f, y1 - h * 0.18f);
+                p.lineTo (x0 + w * 0.72f, y1 - h * 0.18f);
+                p.lineTo (x0 + w * 0.72f, midY);
+                p.lineTo (x1, midY);
+                g.strokePath (p, stroke);
+                break;
+            }
+            case Module::moduleAutotune:
+            {
+                const float r = h * 0.26f;
+                g.fillEllipse (x0 + w * 0.14f, y1 - r * 1.9f, r * 1.5f, r);
+                g.fillRect (x0 + w * 0.14f + r * 1.1f, y0 + h * 0.12f, w * 0.05f, h * 0.66f);
+                g.fillRect (x0 + w * 0.14f + r * 1.1f, y0 + h * 0.12f, w * 0.34f, h * 0.09f);
+                break;
+            }
+            case Module::moduleDelay:
+            {
+                for (int i = 0; i < 3; ++i)
+                {
+                    const float d = w * 0.22f - (float) i * w * 0.05f;
+                    const float cx = x0 + w * (0.22f + (float) i * 0.28f);
+                    g.setColour (colour.withAlpha (1.0f - (float) i * 0.3f));
+                    g.drawEllipse (cx - d * 0.5f, midY - d * 0.5f, d, d, 1.6f);
+                }
+                break;
+            }
+            case Module::moduleReverb:
+            {
+                for (int i = 0; i < 3; ++i)
+                {
+                    const float r = w * (0.16f + (float) i * 0.17f);
+                    juce::Path arc;
+                    arc.addCentredArc (x0 + w * 0.12f, midY, r, r,
+                                        0.0f, juce::MathConstants<float>::pi * -0.45f, juce::MathConstants<float>::pi * 0.45f, true);
+                    g.setColour (colour.withAlpha (1.0f - (float) i * 0.28f));
+                    g.strokePath (arc, stroke);
+                }
+                break;
+            }
+            case Module::moduleLimiter:
+            {
+                const float ceilingY = y0 + h * 0.24f;
+                p.startNewSubPath (x0, y1 - h * 0.12f);
+                p.cubicTo (x0 + w * 0.18f, y0 + h * 0.1f, x0 + w * 0.3f, ceilingY, x0 + w * 0.42f, ceilingY);
+                p.lineTo (x0 + w * 0.58f, ceilingY);
+                p.cubicTo (x0 + w * 0.7f, ceilingY, x0 + w * 0.8f, y1 - h * 0.12f, x1, y1 - h * 0.3f);
+                g.strokePath (p, stroke);
+                g.setColour (colour.withAlpha (0.5f));
+                g.drawHorizontalLine ((int) ceilingY, x0, x1);
+                break;
+            }
+            case Module::moduleGate:
+            {
+                g.fillRoundedRectangle (x0 + w * 0.16f, y0 + h * 0.15f, w * 0.09f, h * 0.7f, 1.0f);
+                g.fillRoundedRectangle (x1 - w * 0.25f, y0 + h * 0.15f, w * 0.09f, h * 0.7f, 1.0f);
+                juce::Path pulse;
+                pulse.startNewSubPath (x0 + w * 0.32f, y1 - h * 0.2f);
+                pulse.lineTo (x0 + w * 0.32f, midY - h * 0.12f);
+                pulse.lineTo (x0 + w * 0.5f, midY - h * 0.12f);
+                pulse.lineTo (x0 + w * 0.5f, y1 - h * 0.2f);
+                pulse.lineTo (x0 + w * 0.68f, y1 - h * 0.2f);
+                pulse.lineTo (x0 + w * 0.68f, midY - h * 0.12f);
+                pulse.lineTo (x1 - w * 0.25f, midY - h * 0.12f);
+                g.strokePath (pulse, stroke);
+                break;
+            }
+            case Module::moduleChorus:
+            {
+                for (int i = 0; i < 2; ++i)
+                {
+                    const float off = (float) i * h * 0.16f;
+                    juce::Path wave;
+                    wave.startNewSubPath (x0, midY + off);
+                    wave.cubicTo (x0 + w * 0.25f, midY - h * 0.3f + off, x0 + w * 0.25f, midY - h * 0.3f + off, x0 + w * 0.5f, midY + off);
+                    wave.cubicTo (x0 + w * 0.75f, midY + h * 0.3f + off, x0 + w * 0.75f, midY + h * 0.3f + off, x1, midY + off);
+                    g.setColour (colour.withAlpha (i == 0 ? 1.0f : 0.5f));
+                    g.strokePath (wave, stroke);
+                }
+                break;
+            }
+            case Module::moduleVoxChoir:
+            {
+                const float r = w * 0.24f;
+                g.setColour (colour.withAlpha (0.5f));
+                g.fillEllipse (x0 + w * 0.06f, midY - r * 0.35f, r, r);
+                g.fillEllipse (x1 - w * 0.06f - r, midY - r * 0.35f, r, r);
+                g.setColour (colour);
+                g.fillEllipse (b.getCentreX() - r * 0.5f, y0 + h * 0.16f, r, r);
+                break;
+            }
+            case Module::moduleStereoShaper:
+            {
+                const float r = w * 0.3f;
+                g.setColour (colour.withAlpha (0.6f));
+                g.drawEllipse (b.getCentreX() - r - w * 0.1f, midY - r * 0.5f, r, r, 1.6f);
+                g.setColour (colour);
+                g.drawEllipse (b.getCentreX() - r * 0.5f + w * 0.1f, midY - r * 0.5f, r, r, 1.6f);
+                break;
+            }
+            case Module::moduleMasteringMeter:
+            {
+                juce::Path arc;
+                const float cy = y1 - h * 0.18f;
+                arc.addCentredArc (b.getCentreX(), cy, w * 0.36f, w * 0.36f, 0.0f,
+                                    juce::MathConstants<float>::pi * -0.85f, juce::MathConstants<float>::pi * -0.15f, true);
+                g.strokePath (arc, stroke);
+                juce::Path needle;
+                needle.startNewSubPath (b.getCentreX(), cy);
+                needle.lineTo (b.getCentreX() + w * 0.2f, cy - h * 0.4f);
+                g.strokePath (needle, stroke);
+                break;
+            }
+            case Module::moduleDeEsser:
+            default:
+            {
+                p.startNewSubPath (x0, y1 - h * 0.1f);
+                p.lineTo (x0 + w * 0.4f, y0 + h * 0.15f);
+                p.lineTo (x0 + w * 0.5f, y0 + h * 0.35f);
+                p.lineTo (x0 + w * 0.6f, y0 + h * 0.15f);
+                p.lineTo (x1, y1 - h * 0.1f);
+                g.strokePath (p, stroke);
+                g.setColour (colour.withAlpha (0.5f));
+                g.drawHorizontalLine ((int) (y0 + h * 0.35f), x0 + w * 0.3f, x1 - w * 0.3f);
+                break;
+            }
+        }
+    }
+}
 
 //==============================================================================
 // ChainRowComponent
@@ -10,68 +191,71 @@ ChainRowComponent::ChainRowComponent (ChainListComponent& ownerIn, MentalsSuiteA
     : slotId (slotIdIn), moduleType (moduleTypeIn), owner (ownerIn), processor (processorIn),
       displayName (MentalsSuiteAudioProcessor::getModuleTypeName (moduleTypeIn))
 {
-    bypassButton.setToggleState (processor.isSlotBypassed (slotId), juce::dontSendNotification);
-    bypassButton.onClick = [this]
+    powerToggle.setClickingTogglesState (true);
+    powerToggle.setToggleState (! processor.isSlotBypassed (slotId), juce::dontSendNotification);
+    powerToggle.setColour (juce::TextButton::buttonColourId, MentalsUI::Colours::slateGrayDark);
+    powerToggle.setColour (juce::TextButton::buttonOnColourId, MentalsUI::Colours::electricBlue);
+    powerToggle.onClick = [this]
     {
-        processor.setSlotBypassed (slotId, bypassButton.getToggleState());
+        processor.setSlotBypassed (slotId, ! powerToggle.getToggleState());
     };
-    addAndMakeVisible (bypassButton);
+    addAndMakeVisible (powerToggle);
 
+    removeButton.setColour (juce::TextButton::buttonColourId, juce::Colours::transparentBlack);
+    removeButton.setColour (juce::TextButton::textColourOffId, MentalsUI::Colours::slateGray);
     removeButton.onClick = [this] { owner.rowRemoveRequested (slotId); };
     addAndMakeVisible (removeButton);
 }
 
 void ChainRowComponent::paint (juce::Graphics& g)
 {
-    auto bounds = getLocalBounds().toFloat();
+    auto bounds = getLocalBounds().toFloat().reduced (3.0f);
 
     g.setColour (isSelected ? MentalsUI::Colours::slateGray : MentalsUI::Colours::slateGrayDark);
-    g.fillRoundedRectangle (bounds.reduced (2.0f), 4.0f);
+    g.fillRoundedRectangle (bounds, 8.0f);
 
-    if (isSelected)
-    {
-        g.setColour (MentalsUI::Colours::electricBlue);
-        g.drawRoundedRectangle (bounds.reduced (2.0f), 4.0f, 2.0f);
-    }
+    g.setColour (isSelected ? MentalsUI::Colours::electricBlue : MentalsUI::Colours::slateGray.withAlpha (0.5f));
+    g.drawRoundedRectangle (bounds, 8.0f, isSelected ? 2.0f : 1.0f);
+
+    auto iconArea = bounds.withY (bounds.getY() + 10.0f).withHeight (28.0f).reduced (bounds.getWidth() * 0.22f, 0.0f);
+    drawModuleGlyph (g, iconArea, moduleType,
+                      isSelected ? MentalsUI::Colours::electricBlue : MentalsUI::Colours::slateGray.brighter (0.5f));
 
     g.setColour (MentalsUI::Colours::white);
-    g.setFont (juce::Font (juce::FontOptions (16.0f, juce::Font::bold)));
-    g.drawText (displayName,
-                getLocalBounds().reduced (10, 6).removeFromTop (24),
-                juce::Justification::centredLeft);
+    g.setFont (juce::Font (juce::FontOptions (12.5f, juce::Font::bold)));
+    auto textArea = bounds.reduced (5.0f, 0.0f).withY (bounds.getY() + 44.0f).withHeight (32.0f);
+    g.drawFittedText (displayName, textArea.toNearestInt(), juce::Justification::centred, 2);
 
-    // Drag handle hint -- three horizontal bars in the top-right corner.
+    // Drag-handle hint -- three small dots at the bottom, echoing the
+    // vertical-list version's bar hint but oriented for left/right dragging.
     g.setColour (MentalsUI::Colours::slateGray);
     for (int i = 0; i < 3; ++i)
-    {
-        const auto y = 8 + i * 5;
-        g.fillRect (getWidth() - 26, y, 18, 2);
-    }
+        g.fillEllipse (bounds.getCentreX() - 9.0f + (float) i * 8.0f, bounds.getBottom() - 11.0f, 3.0f, 3.0f);
 }
 
 void ChainRowComponent::resized()
 {
-    auto bottomRow = getLocalBounds().reduced (10, 6).removeFromBottom (22);
-    bypassButton.setBounds (bottomRow.removeFromLeft (80));
-    removeButton.setBounds (bottomRow.removeFromRight (70));
+    auto b = getLocalBounds().reduced (3);
+    powerToggle.setBounds (b.getX() + 5, b.getY() + 5, 16, 16);
+    removeButton.setBounds (b.getRight() - 19, b.getY() + 5, 14, 14);
 }
 
 void ChainRowComponent::mouseDown (const juce::MouseEvent& e)
 {
-    dragStartMouseY = e.getScreenPosition().getY();
-    dragStartComponentY = getY();
+    dragStartMouseX = e.getScreenPosition().getX();
+    dragStartComponentX = getX();
     isDragging = false;
 }
 
 void ChainRowComponent::mouseDrag (const juce::MouseEvent& e)
 {
-    const auto dy = e.getScreenPosition().getY() - dragStartMouseY;
+    const auto dx = e.getScreenPosition().getX() - dragStartMouseX;
 
-    if (! isDragging && std::abs (dy) < 4)
+    if (! isDragging && std::abs (dx) < 4)
         return;
 
     isDragging = true;
-    owner.rowDragged (slotId, dragStartComponentY + dy);
+    owner.rowDragged (slotId, dragStartComponentX + dx);
 }
 
 void ChainRowComponent::mouseUp (const juce::MouseEvent&)
@@ -90,6 +274,8 @@ void ChainRowComponent::mouseUp (const juce::MouseEvent&)
 ChainListComponent::ChainListComponent (MentalsSuiteAudioProcessor& proc)
     : processor (proc)
 {
+    addButton.setColour (juce::TextButton::buttonColourId, MentalsUI::Colours::slateGrayDark);
+    addButton.setColour (juce::TextButton::textColourOffId, MentalsUI::Colours::electricBlue);
     addButton.onClick = [this] { showAddMenu(); };
     addAndMakeVisible (addButton);
 
@@ -105,7 +291,7 @@ void ChainListComponent::refreshFromProcessor()
 {
     // Full teardown/rebuild rather than diffing -- only ever called after an
     // add/remove or a state load, never during a drag (which just repositions
-    // the existing row components), so the cost of recreating them is a
+    // the existing card components), so the cost of recreating them is a
     // non-issue.
     rows.clear();
     visualOrder.clear();
@@ -120,7 +306,12 @@ void ChainListComponent::refreshFromProcessor()
     }
 
     updateDisplayNames();
-    layoutRows();
+
+    // Grows to fit its own content -- hosted inside the outer editor's
+    // horizontally-scrolling rackViewport, so there's no need to fit within
+    // any particular width here.
+    const int contentWidth = (int) visualOrder.size() * cardWidth + addCardWidth + 12;
+    setSize (contentWidth, cardHeight); // triggers resized() -> layoutRows()
 }
 
 void ChainListComponent::updateDisplayNames()
@@ -151,24 +342,24 @@ void ChainListComponent::layoutRows (int excludeSlotId)
         if (visualOrder[(size_t) slot] == excludeSlotId)
             continue;
 
-        rows[(size_t) slot]->setBounds (0, slot * rowHeight, getWidth(), rowHeight - 4);
+        rows[(size_t) slot]->setBounds (slot * cardWidth + 4, 0, cardWidth - 6, cardHeight);
     }
 
-    addButton.setBounds (10, (int) visualOrder.size() * rowHeight + 4, getWidth() - 20, addButtonHeight);
+    addButton.setBounds ((int) visualOrder.size() * cardWidth + 4, 0, addCardWidth - 6, cardHeight);
 }
 
-void ChainListComponent::rowDragged (int slotId, int newScreenY)
+void ChainListComponent::rowDragged (int slotId, int newScreenX)
 {
     const int maxSlot = (int) visualOrder.size() - 1;
     const int currentSlot = (int) std::distance (visualOrder.begin(),
         std::find (visualOrder.begin(), visualOrder.end(), slotId));
 
-    // Let the dragged row follow the mouse directly...
-    rows[(size_t) currentSlot]->setTopLeftPosition (0, juce::jlimit (0, rowHeight * maxSlot, newScreenY));
+    // Let the dragged card follow the mouse directly...
+    rows[(size_t) currentSlot]->setTopLeftPosition (juce::jlimit (0, cardWidth * maxSlot, newScreenX), 0);
 
     // ...and figure out which slot its centre now falls in, moving both the
-    // row and its slot ID into that slot together if it's moved far enough.
-    const int targetSlot = juce::jlimit (0, maxSlot, (newScreenY + rowHeight / 2) / rowHeight);
+    // card and its slot ID into that slot together if it's moved far enough.
+    const int targetSlot = juce::jlimit (0, maxSlot, (newScreenX + cardWidth / 2) / cardWidth);
 
     if (targetSlot != currentSlot)
     {
@@ -380,20 +571,32 @@ void MasterAssistantPanel::updateStatusLabels()
 MentalsSuiteAudioProcessorEditor::MentalsSuiteAudioProcessorEditor (MentalsSuiteAudioProcessor& p)
     : juce::AudioProcessorEditor (&p), processor (p), masterAssistantPanel (p), chainList (p)
 {
-    productNameLabel.setText ("MENTALS SUITE", juce::dontSendNotification);
+    logoImage.setImage (juce::ImageFileFormat::loadFrom (BinaryData::mentals_logo_png, (size_t) BinaryData::mentals_logo_pngSize));
+    logoImage.setImagePlacement (juce::RectanglePlacement::centred);
+    addAndMakeVisible (logoImage);
+
+    productNameLabel.setText ("SUITE", juce::dontSendNotification);
     productNameLabel.setFont (juce::Font (juce::FontOptions (20.0f, juce::Font::bold)));
     productNameLabel.setColour (juce::Label::textColourId, MentalsUI::Colours::white);
     addAndMakeVisible (productNameLabel);
 
+    chainSummaryLabel.setFont (juce::Font (juce::FontOptions (12.0f)));
+    chainSummaryLabel.setColour (juce::Label::textColourId, MentalsUI::Colours::slateGray);
+    addAndMakeVisible (chainSummaryLabel);
+
     masterAssistantButton.setColour (juce::TextButton::buttonColourId, MentalsUI::Colours::slateGrayDark);
-    masterAssistantButton.setColour (juce::TextButton::textColourOffId, MentalsUI::Colours::white);
+    masterAssistantButton.setColour (juce::TextButton::textColourOffId, MentalsUI::Colours::electricBlue);
     masterAssistantButton.addListener (this);
     addAndMakeVisible (masterAssistantButton);
     masterAssistantPanel.onApplied = [this] { chainList.refreshFromProcessor(); };
 
-    addAndMakeVisible (chainList);
+    rackViewport.setViewedComponent (&chainList, false);
+    rackViewport.setScrollBarsShown (false, true); // horizontal only -- the rack never needs to scroll vertically
+    addAndMakeVisible (rackViewport);
     chainList.onModuleSelected = [this] (int slotId) { showModule (slotId); };
     chainList.onModuleRemoveRequested = [this] (int slotId) { removeModule (slotId); };
+
+    addAndMakeVisible (splitter);
 
     moduleViewport.setScrollBarsShown (true, true);
     addAndMakeVisible (moduleViewport);
@@ -410,13 +613,14 @@ MentalsSuiteAudioProcessorEditor::MentalsSuiteAudioProcessorEditor (MentalsSuite
     const auto initialSlots = processor.getChainSlots();
     showModule (initialSlots.empty() ? -1 : initialSlots.front().slotId);
 
-    startTimerHz (10); // refreshes Master Assistant's capture-progress readout while its popup is open
+    startTimerHz (10); // refreshes Master Assistant's capture-progress readout and the chain summary label
 }
 
 MentalsSuiteAudioProcessorEditor::~MentalsSuiteAudioProcessorEditor()
 {
     stopTimer();
     masterAssistantButton.removeListener (this);
+    rackViewport.setViewedComponent (nullptr, false);
     moduleViewport.setViewedComponent (nullptr, false);
 }
 
@@ -432,6 +636,9 @@ void MentalsSuiteAudioProcessorEditor::buttonClicked (juce::Button* button)
 void MentalsSuiteAudioProcessorEditor::timerCallback()
 {
     masterAssistantPanel.refresh();
+
+    const int count = (int) processor.getChainSlots().size();
+    chainSummaryLabel.setText (count == 1 ? "1 module" : juce::String (count) + " modules", juce::dontSendNotification);
 }
 
 void MentalsSuiteAudioProcessorEditor::showModule (int slotId)
@@ -490,18 +697,34 @@ void MentalsSuiteAudioProcessorEditor::removeModule (int slotId)
 void MentalsSuiteAudioProcessorEditor::paint (juce::Graphics& g)
 {
     g.fillAll (MentalsUI::Colours::charcoalBlack);
+
+    auto topBar = getLocalBounds().removeFromTop (topBarHeight);
+    g.setColour (MentalsUI::Colours::slateGrayDark);
+    g.fillRect (topBar);
+
+    auto rackArea = getLocalBounds().withTrimmedTop (topBarHeight).removeFromTop (rackHeight);
+    g.setColour (MentalsUI::Colours::charcoalBlack.brighter (0.02f));
+    g.fillRect (rackArea);
 }
 
 void MentalsSuiteAudioProcessorEditor::resized()
 {
     auto bounds = getLocalBounds();
 
-    auto topBar = bounds.removeFromTop (topBarHeight);
-    topBar = topBar.reduced (10, 4);
+    auto topBar = bounds.removeFromTop (topBarHeight).reduced (10, 6);
+    logoImage.setBounds (topBar.removeFromLeft (90));
+    topBar.removeFromLeft (10);
     masterAssistantButton.setBounds (topBar.removeFromRight (150));
-    productNameLabel.setBounds (topBar);
+    topBar.removeFromRight (10);
 
-    chainList.setBounds (bounds.removeFromLeft (chainListWidth));
+    auto titleArea = topBar;
+    productNameLabel.setBounds (titleArea.removeFromTop (titleArea.getHeight() / 2 + 4));
+    chainSummaryLabel.setBounds (titleArea);
+
+    rackViewport.setBounds (bounds.removeFromTop (rackHeight));
+
+    splitter.setBounds (bounds.removeFromTop (splitterHeight));
+
     moduleViewport.setBounds (bounds);
     emptyStateLabel.setBounds (bounds);
 }
