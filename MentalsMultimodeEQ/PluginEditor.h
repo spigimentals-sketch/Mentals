@@ -274,7 +274,7 @@ private:
     void updateMidiLearnStatusLabel();
     void updateAiAssistStatusLabel();
     void updateEqMatchStatusLabel();
-    void refreshPresetList();
+    void showPresetsMenu();
     void promptToSavePreset();
     void showSettingsPanel();
     void layoutSettingsPanelContent();
@@ -290,7 +290,13 @@ private:
     // Top bar: compact logo (top left), and preset select/save to its right.
     //==========================================================================
     juce::ImageComponent logoImage;
-    juce::ComboBox presetSelector;
+
+    // Opens a folder-style PopupMenu (see showPresetsMenu()) rather than a
+    // flat ComboBox list -- factory presets are grouped into category
+    // submenus (DRUMS, BASS, ...), rebuilt fresh from
+    // MultiModeEQAudioProcessor::getFactoryPresetCategories() every time
+    // it's opened, so there's no separate list to keep in sync.
+    juce::TextButton presetsButton { "Presets" };
     juce::TextButton presetSaveButton { "Save" };
 
     // Auto Gain / Phase Mode / MIDI Learn used to be a whole extra row at the

@@ -461,11 +461,26 @@ public:
     //==========================================================================
     // Presets: named snapshots of the same state getStateInformation() saves,
     // stored per-user so they're available across projects/DAWs.
+    //
+    // Two tiers: factory presets live one folder deeper, under a category
+    // subdirectory (DRUMS/Kick.xml, VOCALS/Male.xml, ...) -- see
+    // getFactoryPresetCategories() -- while a preset the user saves by name
+    // through the UI stays flat at the presets directory's root (unchanged
+    // behaviour), so the manual save flow never needs the user to pick a
+    // category. loadPreset()/presetName can name either kind: "DRUMS/Kick"
+    // for a factory preset, or a plain name for one of the user's own.
     //==========================================================================
     juce::File getPresetsDirectory() const;
-    juce::StringArray getAvailablePresetNames() const;
+    juce::StringArray getAvailablePresetNames() const; // user (root-level) presets only
     void savePreset (const juce::String& presetName);
     void loadPreset (const juce::String& presetName);
+
+    struct PresetCategory { juce::String name; juce::StringArray presetNames; };
+
+    // One entry per factory category folder, in a fixed display order
+    // (DRUMS, BASS, GUITARS, STRINGS, VOCALS, KEYS, SYNTHS, then anything
+    // else alphabetically), each with its preset names sorted alphabetically.
+    std::vector<PresetCategory> getFactoryPresetCategories() const;
 
     // Restores every parameter to the value it was created with in
     // createParameterLayout(), and clears any MIDI Learn mappings -- used by

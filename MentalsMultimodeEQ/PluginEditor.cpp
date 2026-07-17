@@ -466,14 +466,10 @@ MultiModeEQAudioProcessorEditor::MultiModeEQAudioProcessorEditor (MultiModeEQAud
     logoImage.setImagePlacement (juce::RectanglePlacement::centred);
     addAndMakeVisible (logoImage);
 
-    presetSelector.setTextWhenNothingSelected ("Presets");
-    presetSelector.setColour (juce::ComboBox::backgroundColourId, EditorColours::slateGrayDark);
-    presetSelector.setColour (juce::ComboBox::textColourId,       EditorColours::white);
-    presetSelector.setColour (juce::ComboBox::outlineColourId,    EditorColours::slateGray);
-    presetSelector.setColour (juce::ComboBox::arrowColourId,      EditorColours::white);
-    addAndMakeVisible (presetSelector);
-    presetSelector.addListener (this);
-    refreshPresetList();
+    presetsButton.setColour (juce::TextButton::buttonColourId,  EditorColours::slateGrayDark);
+    presetsButton.setColour (juce::TextButton::textColourOffId, EditorColours::white);
+    presetsButton.onClick = [this] { showPresetsMenu(); };
+    addAndMakeVisible (presetsButton);
 
     presetSaveButton.setColour (juce::TextButton::buttonColourId,  EditorColours::slateGrayDark);
     presetSaveButton.setColour (juce::TextButton::textColourOffId, EditorColours::white);
@@ -721,7 +717,6 @@ MultiModeEQAudioProcessorEditor::~MultiModeEQAudioProcessorEditor()
         tab.removeListener (this);
     modeSelector.removeListener (this);
     filterShapeSelector.removeListener (this);
-    presetSelector.removeListener (this);
 
     for (auto* b : { &eqMatchCaptureButton, &eqMatchLoadRefButton, &eqMatchApplyButton, &eqMatchCancelButton,
                      &midiLearnButton, &midiLearnClearAllButton, &presetSaveButton, &settingsButton,
@@ -980,34 +975,55 @@ void MultiModeEQAudioProcessorEditor::comboBoxChanged (juce::ComboBox* box)
 {
     if (box == &modeSelector || box == &filterShapeSelector)
         updateBandControlVisibility();
-
-    if (box == &presetSelector)
-    {
-        const auto name = presetSelector.getText();
-        if (name == "Default")
-            processor.resetToDefault();
-        else if (name.isNotEmpty())
-            processor.loadPreset (name);
-    }
 }
 
-void MultiModeEQAudioProcessorEditor::refreshPresetList()
+void MultiModeEQAudioProcessorEditor::showPresetsMenu()
 {
-    const auto currentText = presetSelector.getText();
+    juce::PopupMenu menu;
 
-    presetSelector.clear (juce::dontSendNotification);
-    presetSelector.addItem ("Default", 1);
-
-    const auto presetNames = processor.getAvailablePresetNames();
-    if (! presetNames.isEmpty())
+    menu.addItem ("Default", [this]
     {
-        presetSelector.addSeparator();
-        int itemId = 2;
-        for (const auto& name : presetNames)
-            presetSelector.addItem (name, itemId++);
+        processor.resetToDefault();
+        presetsButton.setButtonText ("Default");
+    });
+
+    const auto categories = processor.getFactoryPresetCategories();
+    if (! categories.empty())
+    {
+        menu.addSeparator();
+        for (const auto& category : categories)
+        {
+            juce::PopupMenu submenu;
+            for (const auto& name : category.presetNames)
+            {
+                const auto relativePath = category.name + "/" + name;
+                submenu.addItem (name, [this, relativePath, name]
+                {
+                    processor.loadPreset (relativePath);
+                    presetsButton.setButtonText (name);
+                });
+            }
+            menu.addSubMenu (category.name, submenu);
+        }
     }
 
-    presetSelector.setText (currentText, juce::dontSendNotification);
+    const auto userPresetNames = processor.getAvailablePresetNames();
+    if (! userPresetNames.isEmpty())
+    {
+        juce::PopupMenu userMenu;
+        for (const auto& name : userPresetNames)
+        {
+            userMenu.addItem (name, [this, name]
+            {
+                processor.loadPreset (name);
+                presetsButton.setButtonText (name);
+            });
+        }
+        menu.addSeparator();
+        menu.addSubMenu ("MY PRESETS", userMenu);
+    }
+
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (presetsButton));
 }
 
 void MultiModeEQAudioProcessorEditor::promptToSavePreset()
@@ -1026,8 +1042,7 @@ void MultiModeEQAudioProcessorEditor::promptToSavePreset()
             if (name.isNotEmpty() && name != "Default") // "Default" is reserved for resetToDefault()
             {
                 processor.savePreset (name);
-                refreshPresetList();
-                presetSelector.setText (name, juce::dontSendNotification);
+                presetsButton.setButtonText (name);
             }
         }
     }), true /* deleteWhenDismissed */);
@@ -1058,7 +1073,7 @@ void MultiModeEQAudioProcessorEditor::resized()
         auto t = topBarArea.reduced (8, 4);
         logoImage.setBounds (t.removeFromLeft (110));
         t.removeFromLeft (12);
-        presetSelector.setBounds (t.removeFromLeft (160));
+        presetsButton.setBounds (t.removeFromLeft (160));
         t.removeFromLeft (8);
         presetSaveButton.setBounds (t.removeFromLeft (60));
         t.removeFromLeft (8);

@@ -1425,6 +1425,42 @@ juce::StringArray MultiModeEQAudioProcessor::getAvailablePresetNames() const
     return names;
 }
 
+std::vector<MultiModeEQAudioProcessor::PresetCategory> MultiModeEQAudioProcessor::getFactoryPresetCategories() const
+{
+    std::vector<PresetCategory> categories;
+
+    for (const auto& dir : getPresetsDirectory().findChildFiles (juce::File::findDirectories, false))
+    {
+        PresetCategory category;
+        category.name = dir.getFileName();
+
+        for (const auto& file : dir.findChildFiles (juce::File::findFiles, false, "*.xml"))
+            category.presetNames.add (file.getFileNameWithoutExtension());
+        category.presetNames.sort (true);
+
+        categories.push_back (std::move (category));
+    }
+
+    static constexpr std::array<const char*, 7> canonicalOrder
+        { "DRUMS", "BASS", "GUITARS", "STRINGS", "VOCALS", "KEYS", "SYNTHS" };
+
+    std::sort (categories.begin(), categories.end(), [] (const PresetCategory& a, const PresetCategory& b)
+    {
+        const auto rank = [] (const juce::String& name) -> int
+        {
+            for (int i = 0; i < (int) canonicalOrder.size(); ++i)
+                if (name == canonicalOrder[(size_t) i])
+                    return i;
+            return (int) canonicalOrder.size(); // unrecognised categories sort after the canonical ones
+        };
+
+        const int rankA = rank (a.name), rankB = rank (b.name);
+        return rankA != rankB ? rankA < rankB : a.name < b.name;
+    });
+
+    return categories;
+}
+
 void MultiModeEQAudioProcessor::savePreset (const juce::String& presetName)
 {
     if (presetName.isEmpty())
@@ -1454,22 +1490,39 @@ void MultiModeEQAudioProcessor::resetToDefault()
 
 //==============================================================================
 // Factory presets: one tonal starting point per major instrument/vocal type,
-// each a handful of Parametric moves (every band not listed is switched off,
-// not just left at 0dB, so the graph shows exactly the shape being applied
-// rather than ten flat, cluttering bands). Frequencies/gains/Qs below follow
-// standard mixing-engineering starting points (rumble/plosive high-pass,
-// mud cut around 200-500Hz, a presence bump somewhere in 2-5kHz, an air
-// shelf above 8kHz) adapted per source -- a starting point to dial in
-// further, not a finished mix.
+// organised into category folders (DRUMS/BASS/GUITARS/STRINGS/VOCALS/KEYS/
+// SYNTHS, plus ORCHESTRAL for the two orchestral sections that don't fit
+// any of those seven) -- see getFactoryPresetCategories(), which just scans
+// getPresetsDirectory()'s subfolders, so adding a preset here is the only
+// thing that ever needs to change to make it show up grouped correctly.
+//
+// Each preset is a handful of Parametric moves (every band not listed is
+// switched off, not just left at 0dB, so the graph shows exactly the shape
+// being applied rather than ten flat, cluttering bands). Frequencies/gains/
+// Qs follow standard mixing-engineering starting points (rumble/plosive
+// high-pass, a mud cut around 200-500Hz, a presence bump somewhere in
+// 2-5kHz, an air shelf above 8kHz) adapted per source -- a starting point
+// to dial in further, not a finished mix. The DRUMS folder's per-mic
+// presets (Kick In/Out/Sub, Snare Top/Bottom/Rim, Rack/Floor Tom) follow
+// the same standard multi-mic drum-recording conventions: a sub/inside
+// kick mic pushes deep thump and cuts everything above the target band, an
+// outside kick mic is a gentler, roomier version of the same shape, a
+// snare bottom mic leans on wire buzz rather than body, a rim/cross-stick
+// mic is almost all transient with very little low end kept, and so on.
 //==============================================================================
 void MultiModeEQAudioProcessor::seedFactoryPresetsIfMissing()
 {
-    if (! getAvailablePresetNames().isEmpty())
+    // DRUMS is always seeded alongside every other category, so its
+    // presence alone is a reliable "have factory presets already been
+    // written" marker -- getAvailablePresetNames() (root-level only) can't
+    // be used for this any more now that factory presets live one folder
+    // deeper.
+    if (getPresetsDirectory().getChildFile ("DRUMS").isDirectory())
         return;
 
     struct Move { int band; float freqHz; float gainDb; float q; FilterShape shape; };
 
-    auto applyPreset = [this] (const juce::String& name, std::initializer_list<Move> moves)
+    auto applyPreset = [this] (const juce::String& category, const juce::String& name, std::initializer_list<Move> moves)
     {
         resetToDefault();
         for (auto& band : bands)
@@ -1485,32 +1538,35 @@ void MultiModeEQAudioProcessor::seedFactoryPresetsIfMissing()
             band.filterShapeParam->setValueNotifyingHost (band.filterShapeParam->convertTo0to1 ((float) (int) m.shape));
         }
 
-        savePreset (name);
+        const auto file = getPresetsDirectory().getChildFile (category).getChildFile (name + ".xml");
+        file.getParentDirectory().createDirectory();
+        if (auto xml = buildStateXml())
+            xml->writeTo (file);
     };
 
-    // ---- Vocals -----------------------------------------------------------------
-    applyPreset ("Vocal - Male", {
+    // ---- VOCALS -------------------------------------------------------------------
+    applyPreset ("VOCALS", "Male", {
         { 0, 90.0f,     0.0f, 0.7f, FilterShape::HighPass },
         { 1, 300.0f,   -2.5f, 1.0f, FilterShape::Bell },
         { 2, 3000.0f,   3.0f, 1.0f, FilterShape::Bell },
         { 3, 10000.0f,  2.0f, 0.7f, FilterShape::HighShelf },
     });
 
-    applyPreset ("Vocal - Female", {
+    applyPreset ("VOCALS", "Female", {
         { 0, 110.0f,    0.0f, 0.7f, FilterShape::HighPass },
         { 1, 400.0f,   -2.0f, 1.0f, FilterShape::Bell },
         { 2, 5000.0f,   2.5f, 1.2f, FilterShape::Bell },
         { 3, 12000.0f,  2.0f, 0.7f, FilterShape::HighShelf },
     });
 
-    applyPreset ("Vocal - Backing Choir", {
+    applyPreset ("VOCALS", "Backing Choir", {
         { 0, 150.0f,    0.0f, 0.7f, FilterShape::HighPass },
         { 1, 500.0f,   -2.0f, 1.0f, FilterShape::Bell },
         { 2, 3000.0f,  -1.5f, 1.0f, FilterShape::Bell },
         { 3, 10000.0f,  1.5f, 0.7f, FilterShape::HighShelf },
     });
 
-    applyPreset ("Vocal - Rap Hip-Hop", {
+    applyPreset ("VOCALS", "Rap Hip-Hop", {
         { 0, 90.0f,     0.0f, 0.7f, FilterShape::HighPass },
         { 1, 150.0f,    1.5f, 1.0f, FilterShape::Bell },
         { 2, 350.0f,   -3.0f, 1.1f, FilterShape::Bell },
@@ -1518,35 +1574,35 @@ void MultiModeEQAudioProcessor::seedFactoryPresetsIfMissing()
         { 4, 10000.0f,  2.0f, 0.7f, FilterShape::HighShelf },
     });
 
-    // ---- Drums --------------------------------------------------------------------
-    applyPreset ("Drums - Kick", {
+    // ---- DRUMS: whole-kit starting points -------------------------------------------
+    applyPreset ("DRUMS", "Kick", {
         { 0, 30.0f,     0.0f, 0.7f, FilterShape::HighPass },
         { 1, 60.0f,     4.0f, 1.0f, FilterShape::Bell },
         { 2, 350.0f,   -4.0f, 1.2f, FilterShape::Bell },
         { 3, 3500.0f,   3.0f, 1.0f, FilterShape::Bell },
     });
 
-    applyPreset ("Drums - Snare", {
+    applyPreset ("DRUMS", "Snare", {
         { 0, 200.0f,    2.5f, 1.0f, FilterShape::Bell },
         { 1, 450.0f,   -2.5f, 1.1f, FilterShape::Bell },
         { 2, 3500.0f,   3.5f, 1.0f, FilterShape::Bell },
         { 3, 8000.0f,   2.0f, 0.7f, FilterShape::HighShelf },
     });
 
-    applyPreset ("Drums - Hi-Hat Cymbals", {
+    applyPreset ("DRUMS", "Hi-Hat Cymbals", {
         { 0, 400.0f,    0.0f, 0.7f, FilterShape::HighPass },
         { 1, 3000.0f,  -1.5f, 1.0f, FilterShape::Bell },
         { 2, 10000.0f,  3.0f, 0.7f, FilterShape::HighShelf },
     });
 
-    applyPreset ("Drums - Toms", {
+    applyPreset ("DRUMS", "Toms", {
         { 0, 50.0f,     0.0f, 0.7f, FilterShape::HighPass },
         { 1, 120.0f,    3.0f, 1.0f, FilterShape::Bell },
         { 2, 400.0f,   -2.5f, 1.1f, FilterShape::Bell },
         { 3, 4500.0f,   2.5f, 1.0f, FilterShape::Bell },
     });
 
-    applyPreset ("Drums - Full Kit Overheads", {
+    applyPreset ("DRUMS", "Full Kit Overheads", {
         { 0, 60.0f,     0.0f, 0.7f, FilterShape::HighPass },
         { 1, 100.0f,    1.5f, 1.0f, FilterShape::Bell },
         { 2, 400.0f,   -2.0f, 1.0f, FilterShape::Bell },
@@ -1554,8 +1610,67 @@ void MultiModeEQAudioProcessor::seedFactoryPresetsIfMissing()
         { 4, 10000.0f,  2.0f, 0.7f, FilterShape::HighShelf },
     });
 
-    // ---- Bass -----------------------------------------------------------------------
-    applyPreset ("Bass - Electric", {
+    // ---- DRUMS: individual mic positions --------------------------------------------
+    // Sub/inside-kick mic: almost pure fundamental thump -- boosted hard,
+    // then everything above the target band low-passed away, since a sub
+    // mic's own diffuse pickup above a few hundred Hz is just boom to
+    // filter out, not useful signal.
+    applyPreset ("DRUMS", "Kick Sub", {
+        { 0, 20.0f,     0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 50.0f,     4.0f, 1.0f, FilterShape::Bell },
+        { 2, 500.0f,    0.0f, 0.7f, FilterShape::LowPass },
+    });
+
+    applyPreset ("DRUMS", "Kick In", {
+        { 0, 30.0f,     0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 80.0f,     3.0f, 1.0f, FilterShape::Bell },
+        { 2, 400.0f,   -3.5f, 1.2f, FilterShape::Bell },
+        { 3, 4000.0f,   4.0f, 1.0f, FilterShape::Bell },
+    });
+
+    applyPreset ("DRUMS", "Kick Out", {
+        { 0, 30.0f,     0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 80.0f,     2.5f, 1.0f, FilterShape::Bell },
+        { 2, 350.0f,   -3.0f, 1.2f, FilterShape::Bell },
+        { 3, 3000.0f,   1.5f, 1.0f, FilterShape::Bell },
+    });
+
+    applyPreset ("DRUMS", "Snare Top", {
+        { 0, 180.0f,    2.5f, 1.0f, FilterShape::Bell },
+        { 1, 450.0f,   -2.5f, 1.1f, FilterShape::Bell },
+        { 2, 4000.0f,   3.5f, 1.0f, FilterShape::Bell },
+        { 3, 9000.0f,   2.0f, 0.7f, FilterShape::HighShelf },
+    });
+
+    applyPreset ("DRUMS", "Snare Bottom", {
+        { 0, 200.0f,    0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 400.0f,   -2.5f, 1.1f, FilterShape::Bell },
+        { 2, 5000.0f,   3.0f, 1.0f, FilterShape::Bell },
+        { 3, 9000.0f,   1.5f, 0.7f, FilterShape::HighShelf },
+    });
+
+    applyPreset ("DRUMS", "Snare Rim", {
+        { 0, 250.0f,    0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 3500.0f,   2.5f, 1.0f, FilterShape::Bell },
+        { 2, 9000.0f,   2.0f, 0.7f, FilterShape::HighShelf },
+    });
+
+    applyPreset ("DRUMS", "Rack Tom", {
+        { 0, 60.0f,     0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 180.0f,    3.0f, 1.0f, FilterShape::Bell },
+        { 2, 500.0f,   -2.5f, 1.1f, FilterShape::Bell },
+        { 3, 4500.0f,   2.5f, 1.0f, FilterShape::Bell },
+    });
+
+    applyPreset ("DRUMS", "Floor Tom", {
+        { 0, 40.0f,     0.0f, 0.7f, FilterShape::HighPass },
+        { 1, 100.0f,    3.5f, 1.0f, FilterShape::Bell },
+        { 2, 400.0f,   -2.5f, 1.1f, FilterShape::Bell },
+        { 3, 3800.0f,   2.0f, 1.0f, FilterShape::Bell },
+    });
+
+    // ---- BASS -----------------------------------------------------------------------
+    applyPreset ("BASS", "Electric", {
         { 0, 35.0f,     0.0f, 0.7f, FilterShape::HighPass },
         { 1, 90.0f,     3.0f, 1.0f, FilterShape::Bell },
         { 2, 300.0f,   -3.0f, 1.2f, FilterShape::Bell },
@@ -1563,51 +1678,51 @@ void MultiModeEQAudioProcessor::seedFactoryPresetsIfMissing()
         { 4, 2500.0f,   2.0f, 1.0f, FilterShape::Bell },
     });
 
-    applyPreset ("Bass - Upright Double", {
+    applyPreset ("BASS", "Upright Double", {
         { 0, 30.0f,     0.0f, 0.7f, FilterShape::HighPass },
         { 1, 80.0f,     2.5f, 1.0f, FilterShape::Bell },
         { 2, 220.0f,   -3.0f, 1.3f, FilterShape::Bell },
         { 3, 2000.0f,   1.5f, 1.0f, FilterShape::Bell },
     });
 
-    applyPreset ("Bass - Sub 808", {
+    applyPreset ("BASS", "Sub 808", {
         { 0, 25.0f,     0.0f, 0.7f, FilterShape::HighPass },
         { 1, 50.0f,     4.0f, 1.0f, FilterShape::Bell },
         { 2, 250.0f,   -3.0f, 1.1f, FilterShape::Bell },
         { 3, 5000.0f,  -3.0f, 0.7f, FilterShape::HighShelf },
     });
 
-    // ---- Guitars --------------------------------------------------------------------
-    applyPreset ("Guitar - Acoustic", {
+    // ---- GUITARS --------------------------------------------------------------------
+    applyPreset ("GUITARS", "Acoustic", {
         { 0, 90.0f,     0.0f, 0.7f, FilterShape::HighPass },
         { 1, 250.0f,   -2.5f, 1.1f, FilterShape::Bell },
         { 2, 3500.0f,   2.0f, 1.0f, FilterShape::Bell },
         { 3, 11000.0f,  2.5f, 0.7f, FilterShape::HighShelf },
     });
 
-    applyPreset ("Guitar - Electric Clean", {
+    applyPreset ("GUITARS", "Electric Clean", {
         { 0, 100.0f,    0.0f, 0.7f, FilterShape::HighPass },
         { 1, 350.0f,   -2.0f, 1.1f, FilterShape::Bell },
         { 2, 3000.0f,   2.0f, 1.0f, FilterShape::Bell },
         { 3, 8000.0f,   1.5f, 0.7f, FilterShape::HighShelf },
     });
 
-    applyPreset ("Guitar - Electric Distorted", {
+    applyPreset ("GUITARS", "Electric Distorted", {
         { 0, 120.0f,    0.0f, 0.7f, FilterShape::HighPass },
         { 1, 450.0f,   -3.0f, 1.2f, FilterShape::Bell },
         { 2, 1800.0f,   2.5f, 1.0f, FilterShape::Bell },
         { 3, 7000.0f,  -2.0f, 1.0f, FilterShape::Bell },
     });
 
-    // ---- Keys and synths --------------------------------------------------------
-    applyPreset ("Piano - Acoustic", {
+    // ---- KEYS -------------------------------------------------------------------------
+    applyPreset ("KEYS", "Piano Acoustic", {
         { 0, 40.0f,     0.0f, 0.7f, FilterShape::HighPass },
         { 1, 250.0f,   -2.0f, 1.0f, FilterShape::Bell },
         { 2, 3000.0f,   2.0f, 1.0f, FilterShape::Bell },
         { 3, 10000.0f,  1.5f, 0.7f, FilterShape::HighShelf },
     });
 
-    applyPreset ("Keys - Electric Piano Rhodes", {
+    applyPreset ("KEYS", "Electric Piano Rhodes", {
         { 0, 60.0f,     0.0f, 0.7f, FilterShape::HighPass },
         { 1, 180.0f,    1.5f, 1.0f, FilterShape::Bell },
         { 2, 500.0f,   -1.5f, 1.0f, FilterShape::Bell },
@@ -1615,35 +1730,37 @@ void MultiModeEQAudioProcessor::seedFactoryPresetsIfMissing()
         { 4, 9000.0f,   1.5f, 0.7f, FilterShape::HighShelf },
     });
 
-    applyPreset ("Synth - Lead", {
+    // ---- SYNTHS -------------------------------------------------------------------------
+    applyPreset ("SYNTHS", "Lead", {
         { 0, 80.0f,     0.0f, 0.7f, FilterShape::HighPass },
         { 1, 350.0f,   -1.5f, 1.0f, FilterShape::Bell },
         { 2, 2500.0f,   2.5f, 1.0f, FilterShape::Bell },
         { 3, 10000.0f,  2.0f, 0.7f, FilterShape::HighShelf },
     });
 
-    applyPreset ("Synth - Pad", {
+    applyPreset ("SYNTHS", "Pad", {
         { 0, 100.0f,    0.0f, 0.7f, FilterShape::HighPass },
         { 1, 900.0f,   -2.0f, 0.8f, FilterShape::Bell },
         { 2, 12000.0f,  2.5f, 0.7f, FilterShape::HighShelf },
     });
 
-    // ---- Orchestral / horns -------------------------------------------------------
-    applyPreset ("Strings - Section", {
+    // ---- STRINGS ------------------------------------------------------------------------
+    applyPreset ("STRINGS", "Section", {
         { 0, 100.0f,    0.0f, 0.7f, FilterShape::HighPass },
         { 1, 350.0f,   -1.5f, 1.0f, FilterShape::Bell },
         { 2, 3500.0f,   2.0f, 1.0f, FilterShape::Bell },
         { 3, 10000.0f,  2.0f, 0.7f, FilterShape::HighShelf },
     });
 
-    applyPreset ("Brass - Section", {
+    // ---- ORCHESTRAL: horns/winds, not covered by the seven requested folders ---------
+    applyPreset ("ORCHESTRAL", "Brass Section", {
         { 0, 100.0f,    0.0f, 0.7f, FilterShape::HighPass },
         { 1, 600.0f,   -2.5f, 1.2f, FilterShape::Bell },
         { 2, 3000.0f,   2.5f, 1.0f, FilterShape::Bell },
         { 3, 8000.0f,   1.5f, 0.7f, FilterShape::HighShelf },
     });
 
-    applyPreset ("Woodwinds", {
+    applyPreset ("ORCHESTRAL", "Woodwinds", {
         { 0, 120.0f,    0.0f, 0.7f, FilterShape::HighPass },
         { 1, 500.0f,   -1.5f, 1.0f, FilterShape::Bell },
         { 2, 4000.0f,   2.0f, 1.0f, FilterShape::Bell },
