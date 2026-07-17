@@ -202,7 +202,7 @@ void MentalsVoxChoirAudioProcessorEditor::resized()
 
     constexpr int topBarHeight   = 40;
     constexpr int splitterHeight = 8;
-    constexpr int panelHeight    = 140;
+    constexpr int panelHeight    = 220;
 
     auto topBarArea = area.removeFromTop (topBarHeight);
     {
@@ -231,7 +231,7 @@ void MentalsVoxChoirAudioProcessorEditor::resized()
     const int cellWidth = p.getWidth() / knobs.size();
     for (auto* knob : knobs)
     {
-        auto cell = p.removeFromLeft (cellWidth).reduced (8, 0);
+        auto cell = p.removeFromLeft (cellWidth).reduced (4, 0);
         if (knob == &voicesSelector)
             cell = cell.withSizeKeepingCentre (cell.getWidth(), 24).withY (cell.getY() + cell.getHeight() / 2 - 12);
         knob->setBounds (cell);
