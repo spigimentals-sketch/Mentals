@@ -57,6 +57,7 @@ add_subdirectory(MentalsCompressor)
 add_subdirectory(MentalsDeEsser)
 add_subdirectory(MentalsAutotune)
 add_subdirectory(MentalsLimiter)
+add_subdirectory(MentalsGate)
 
 # ----------------------------------------------------------------------------
 # Mentals Suite chains the plugins above together in one instance -- added
