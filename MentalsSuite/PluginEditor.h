@@ -176,6 +176,14 @@ private:
     void timerCallback() override;
     void parentHierarchyChanged() override { MentalsUI::enableMaximiseButtonIfStandalone (*this); }
 
+    // Grows (or shrinks) the currently-shown module's own editor to fill
+    // moduleViewport's visible area, clamped to that editor's own
+    // setResizeLimits() -- otherwise a maximized Suite window would just
+    // leave the hosted editor at whatever size it last was, surrounded by
+    // dead space (or forcing scrollbars) instead of actually using the
+    // room a bigger window gives it.
+    void fitModuleEditorToViewport();
+
     MentalsSuiteAudioProcessor& processor;
 
     juce::ImageComponent logoImage;

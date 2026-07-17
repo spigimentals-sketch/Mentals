@@ -607,7 +607,7 @@ MentalsSuiteAudioProcessorEditor::MentalsSuiteAudioProcessorEditor (MentalsSuite
     addAndMakeVisible (emptyStateLabel);
 
     setResizable (true, true);
-    setResizeLimits (1000, 650, 1800, 1100);
+    setResizeLimits (1000, 650, 3840, 2160); // comfortably covers a maximized window on any real display, up to 4K
     setSize (1100, 700);
 
     const auto initialSlots = processor.getChainSlots();
@@ -670,6 +670,33 @@ void MentalsSuiteAudioProcessorEditor::showModule (int slotId)
     }
 
     moduleViewport.setViewedComponent (moduleEditors[slotId].get(), false);
+    fitModuleEditorToViewport();
+}
+
+void MentalsSuiteAudioProcessorEditor::fitModuleEditorToViewport()
+{
+    if (currentlyShownSlotId < 0)
+        return;
+
+    const auto it = moduleEditors.find (currentlyShownSlotId);
+    if (it == moduleEditors.end())
+        return;
+
+    auto* editor = it->second.get();
+
+    // getMaximumVisibleWidth/Height already account for whichever scrollbars
+    // are about to be needed, so this converges instead of oscillating
+    // between "fits" and "needs a scrollbar" every call.
+    int targetW = moduleViewport.getMaximumVisibleWidth();
+    int targetH = moduleViewport.getMaximumVisibleHeight();
+
+    if (auto* editorConstrainer = editor->getConstrainer())
+    {
+        targetW = juce::jlimit ((int) editorConstrainer->getMinimumWidth(), (int) editorConstrainer->getMaximumWidth(), targetW);
+        targetH = juce::jlimit ((int) editorConstrainer->getMinimumHeight(), (int) editorConstrainer->getMaximumHeight(), targetH);
+    }
+
+    editor->setSize (targetW, targetH);
 }
 
 void MentalsSuiteAudioProcessorEditor::removeModule (int slotId)
@@ -727,4 +754,6 @@ void MentalsSuiteAudioProcessorEditor::resized()
 
     moduleViewport.setBounds (bounds);
     emptyStateLabel.setBounds (bounds);
+
+    fitModuleEditorToViewport();
 }
