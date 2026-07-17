@@ -59,6 +59,7 @@ add_subdirectory(MentalsAutotune)
 add_subdirectory(MentalsLimiter)
 add_subdirectory(MentalsGate)
 add_subdirectory(MentalsChorus)
+add_subdirectory(MentalsVoxChoir)
 
 # ----------------------------------------------------------------------------
 # Mentals Suite chains the plugins above together in one instance -- added

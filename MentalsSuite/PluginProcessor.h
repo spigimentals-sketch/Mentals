@@ -17,6 +17,7 @@
 #include "../MentalsLimiter/PluginProcessor.h"
 #include "../MentalsGate/PluginProcessor.h"
 #include "../MentalsChorus/PluginProcessor.h"
+#include "../MentalsVoxChoir/PluginProcessor.h"
 
 #include <memory>
 #include <vector>
@@ -95,6 +96,7 @@ public:
         moduleLimiter,
         moduleGate,
         moduleChorus,
+        moduleVoxChoir,
         numModuleTypes
     };
 
