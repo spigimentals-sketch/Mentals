@@ -12,6 +12,7 @@ MentalsLimiterAudioProcessor::MentalsLimiterAudioProcessor()
     ceilingParam   = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("ceiling"));
     releaseParam   = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("release"));
     mixParam       = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("mix"));
+    truePeakParam  = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("truePeak"));
 }
 
 //==============================================================================
@@ -39,13 +40,15 @@ juce::AudioProcessorValueTreeState::ParameterLayout MentalsLimiterAudioProcessor
         juce::NormalisableRange<float> (0.0f, 100.0f, 0.01f), 100.0f,
         juce::AudioParameterFloatAttributes().withLabel ("%")));
 
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "truePeak", "True Peak", true));
+
     return { params.begin(), params.end() };
 }
 
 //==============================================================================
 void MentalsLimiterAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    juce::ignoreUnused (samplesPerBlock);
     currentSampleRate = sampleRate;
 
     const int lookaheadSamples = juce::jmax (1, (int) (lookaheadMs * 0.001 * sampleRate));
@@ -59,6 +62,14 @@ void MentalsLimiterAudioProcessor::prepareToPlay (double sampleRate, int samples
     envelopeFollower.prepare (sampleRate);
     envelopeFollower.setAttackRelease (attackMs, releaseParam->get());
     envelopeFollower.reset();
+
+    oversampler = std::make_unique<juce::dsp::Oversampling<float>> (
+        2, 2, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR);
+    oversampler->initProcessing ((size_t) samplesPerBlock);
+    oversampler->reset();
+
+    gainedBuffer.setSize (2, samplesPerBlock);
+    truePeakLevel.assign ((size_t) samplesPerBlock, 0.0f);
 
     outputPeakLinear = 0.0f;
     clipHoldBlocksRemaining = 0;
@@ -83,29 +94,75 @@ void MentalsLimiterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
 
     const int numChannels = juce::jmin (buffer.getNumChannels(), maxSupportedChannels);
     const int numSamples  = buffer.getNumSamples();
+    const int oversamplingChannels = juce::jmin (numChannels, gainedBuffer.getNumChannels());
 
     const float inputGain  = juce::Decibels::decibelsToGain (inputGainParam->get());
     const float ceilingLin = juce::Decibels::decibelsToGain (ceilingParam->get());
     const float mix        = juce::jlimit (0.0f, 1.0f, mixParam->get() * 0.01f);
+    const bool  truePeakOn = truePeakParam->get();
 
     envelopeFollower.setAttackRelease (attackMs, releaseParam->get());
 
+    // ---- Pass 1: apply Input Gain up front, into gainedBuffer -- needed as
+    // a whole block (not interleaved sample-by-sample like the loop below)
+    // so it can be handed to the oversampler in one call.
+    gainedBuffer.setSize (gainedBuffer.getNumChannels(), numSamples, false, false, true);
+    for (int ch = 0; ch < oversamplingChannels; ++ch)
+    {
+        auto* dst = gainedBuffer.getWritePointer (ch);
+        const auto* src = buffer.getReadPointer (ch);
+        for (int n = 0; n < numSamples; ++n)
+            dst[n] = src[n] * inputGain;
+    }
+
+    // ---- True-peak scan (see class comment) --------------------------------------
+    if ((int) truePeakLevel.size() < numSamples)
+        truePeakLevel.resize ((size_t) numSamples);
+
+    if (truePeakOn && oversampler != nullptr)
+    {
+        juce::dsp::AudioBlock<float> gainedBlock (gainedBuffer);
+        auto trimmedBlock = gainedBlock.getSubsetChannelBlock (0, (size_t) oversamplingChannels).getSubBlock (0, (size_t) numSamples);
+        auto oversampled = oversampler->processSamplesUp (juce::dsp::AudioBlock<const float> (trimmedBlock));
+
+        const size_t factor = oversampled.getNumSamples() / (size_t) juce::jmax (1, numSamples);
+        for (int n = 0; n < numSamples; ++n)
+        {
+            float peak = 0.0f;
+            for (size_t ch = 0; ch < oversampled.getNumChannels(); ++ch)
+            {
+                const auto* data = oversampled.getChannelPointer (ch);
+                for (size_t k = 0; k < factor; ++k)
+                {
+                    const size_t idx = (size_t) n * factor + k;
+                    if (idx < oversampled.getNumSamples())
+                        peak = juce::jmax (peak, std::abs (data[idx]));
+                }
+            }
+            truePeakLevel[(size_t) n] = peak;
+        }
+    }
+    else
+    {
+        for (int n = 0; n < numSamples; ++n)
+        {
+            float peak = 0.0f;
+            for (int ch = 0; ch < oversamplingChannels; ++ch)
+                peak = juce::jmax (peak, std::abs (gainedBuffer.getReadPointer (ch)[n]));
+            truePeakLevel[(size_t) n] = peak;
+        }
+    }
+
+    // ---- Pass 2: envelope + look-ahead + gain application ------------------------
     float blockMinGainReductionDb = 0.0f;
-    std::array<float, maxSupportedChannels> gained {};
 
     for (int n = 0; n < numSamples; ++n)
     {
-        float levelAbs = 0.0f;
-        for (int ch = 0; ch < numChannels; ++ch)
-        {
-            gained[(size_t) ch] = buffer.getReadPointer (ch)[n] * inputGain;
-            levelAbs = juce::jmax (levelAbs, std::abs (gained[(size_t) ch]));
-        }
-
-        // Envelope reacts to the UNDELAYED level; gain is applied to the
-        // DELAYED signal below -- see class comment for why that's what
-        // makes this a genuine look-ahead limiter rather than a plain one.
-        const float envelope = envelopeFollower.process (levelAbs);
+        // Envelope reacts to the UNDELAYED, true-peak-aware level; gain is
+        // applied to the DELAYED signal below -- see class comment for why
+        // that's what makes this a genuine look-ahead limiter rather than a
+        // plain one.
+        const float envelope = envelopeFollower.process (truePeakLevel[(size_t) n]);
         const float gain = envelope > ceilingLin ? ceilingLin / envelope : 1.0f;
         const float gainReductionDb = juce::Decibels::gainToDecibels (gain);
         blockMinGainReductionDb = juce::jmin (blockMinGainReductionDb, gainReductionDb);
@@ -116,8 +173,12 @@ void MentalsLimiterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
             const int delaySize = (int) delayLine.size();
             int& writePos = delayWritePos[(size_t) ch];
 
+            const float gainedSample = ch < oversamplingChannels
+                ? gainedBuffer.getReadPointer (ch)[n]
+                : buffer.getReadPointer (ch)[n] * inputGain;
+
             const float delayed = delayLine[(size_t) writePos];
-            delayLine[(size_t) writePos] = gained[(size_t) ch];
+            delayLine[(size_t) writePos] = gainedSample;
             writePos = (writePos + 1) % delaySize;
 
             const float limited = delayed * gain;

@@ -61,8 +61,11 @@ private:
     //==========================================================================
     juce::ImageComponent logoImage;
     juce::Label productNameLabel;
+    juce::TextButton truePeakToggle { "True Peak" };
     juce::ComboBox presetSelector;
     juce::TextButton presetSaveButton { "Save" };
+
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> truePeakAttachment;
 
     LimiterTransferCurveComponent transferCurve;
     MentalsUI::SplitterBar splitter;

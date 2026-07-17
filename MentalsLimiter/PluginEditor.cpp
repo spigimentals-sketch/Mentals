@@ -40,6 +40,11 @@ void LimiterTransferCurveComponent::paint (juce::Graphics& g)
 
     g.setColour (MentalsUI::Colours::goldenYellow);
     g.strokePath (curve, juce::PathStrokeType (2.0f));
+
+    g.setColour (processor.truePeakParam->get() ? MentalsUI::Colours::electricBlue : MentalsUI::Colours::slateGray);
+    g.setFont (juce::Font (juce::FontOptions (12.0f).withStyle ("Bold")));
+    g.drawText (processor.truePeakParam->get() ? "True Peak ON" : "True Peak OFF (sample peak only)",
+                juce::Rectangle<float> (bounds.getX(), bounds.getY(), bounds.getWidth(), 18.0f), juce::Justification::left);
 }
 
 //==============================================================================
@@ -60,6 +65,13 @@ MentalsLimiterAudioProcessorEditor::MentalsLimiterAudioProcessorEditor (MentalsL
     productNameLabel.setColour (juce::Label::textColourId, MentalsUI::Colours::white);
     productNameLabel.setFont (juce::Font (juce::FontOptions (16.0f).withStyle ("Bold")));
     addAndMakeVisible (productNameLabel);
+
+    truePeakToggle.setClickingTogglesState (true);
+    truePeakToggle.setColour (juce::TextButton::buttonColourId,   MentalsUI::Colours::slateGrayDark);
+    truePeakToggle.setColour (juce::TextButton::buttonOnColourId, MentalsUI::Colours::electricBlue);
+    truePeakToggle.setColour (juce::TextButton::textColourOffId,  MentalsUI::Colours::white);
+    truePeakToggle.setColour (juce::TextButton::textColourOnId,   MentalsUI::Colours::charcoalBlack);
+    addAndMakeVisible (truePeakToggle);
 
     presetSelector.setTextWhenNothingSelected ("Presets");
     presetSelector.setColour (juce::ComboBox::backgroundColourId, MentalsUI::Colours::slateGrayDark);
@@ -105,6 +117,8 @@ MentalsLimiterAudioProcessorEditor::MentalsLimiterAudioProcessorEditor (MentalsL
         processor.apvts, "release", releaseSlider.slider);
     mixAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processor.apvts, "mix", mixSlider.slider);
+    truePeakAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        processor.apvts, "truePeak", truePeakToggle);
 
     setResizable (true, true);
     setResizeLimits (620, 460, 1300, 900);
@@ -201,10 +215,12 @@ void MentalsLimiterAudioProcessorEditor::resized()
         logoImage.setBounds (t.removeFromLeft (90));
         t.removeFromLeft (8);
         productNameLabel.setBounds (t.removeFromLeft (110));
-        t.removeFromLeft (12);
-        presetSelector.setBounds (t.removeFromLeft (160));
-        t.removeFromLeft (8);
-        presetSaveButton.setBounds (t.removeFromLeft (60));
+
+        presetSaveButton.setBounds (t.removeFromRight (60));
+        t.removeFromRight (8);
+        presetSelector.setBounds (t.removeFromRight (160));
+        t.removeFromRight (12);
+        truePeakToggle.setBounds (t.removeFromRight (90));
     }
 
     auto panelArea    = area.removeFromBottom (panelHeight);

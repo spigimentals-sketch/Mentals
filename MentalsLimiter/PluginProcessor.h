@@ -27,6 +27,21 @@
 // Both channels always share one gain-reduction value (stereo-linked),
 // the standard behaviour for a limiter -- letting channels reduce
 // independently would shift the stereo image on transients.
+//
+// True Peak (ITU-R BS.1770 Annex 2, optional, on by default): a plain
+// sample-peak detector can miss inter-sample peaks that a D/A converter's
+// or a lossy encoder's own reconstruction filter produces between two
+// samples that are each individually under the Ceiling -- exactly what
+// happens if content is limited right up to 0dBFS and then clips after
+// MP3/AAC encoding or D/A conversion. When enabled, the gained signal is
+// also oversampled 4x (juce::dsp::Oversampling, the same technique Mentals
+// Mastering Meter's true-peak reading uses) purely to see the higher,
+// more accurate peak within each sample interval; that's what actually
+// drives the envelope follower and gain reduction below, so the limiter
+// reacts to peaks a sample-domain-only detector would let through. The
+// oversampling filter's own latency never needs compensating or
+// reporting: its output is scanned for a peak value and discarded, never
+// played back, so it doesn't delay the real signal path at all.
 //==============================================================================
 class MentalsLimiterAudioProcessor : public juce::AudioProcessor
 {
@@ -82,6 +97,7 @@ public:
     juce::AudioParameterFloat* ceilingParam   = nullptr;
     juce::AudioParameterFloat* releaseParam   = nullptr;
     juce::AudioParameterFloat* mixParam       = nullptr;
+    juce::AudioParameterBool*  truePeakParam  = nullptr;
 
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
@@ -97,6 +113,16 @@ private:
     std::array<int, maxSupportedChannels> delayWritePos {};
 
     MentalsUI::DynamicsDSP::EnvelopeFollower envelopeFollower;
+
+    // True Peak detection -- see class comment. gainedBuffer holds the
+    // input-gained signal for the whole block (computed once, up front,
+    // rather than folded into the main per-sample loop) so it can be
+    // handed to the oversampler as one AudioBlock; truePeakLevel then holds
+    // one true-peak-aware level per original-rate sample, read by the main
+    // loop below in place of a plain per-sample abs().
+    std::unique_ptr<juce::dsp::Oversampling<float>> oversampler;
+    juce::AudioBuffer<float> gainedBuffer;
+    std::vector<float> truePeakLevel;
 
     std::atomic<float> currentGainReductionDb { 0.0f };
     std::atomic<float> outputPeakLinear { 0.0f };
