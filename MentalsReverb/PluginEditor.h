@@ -70,12 +70,12 @@ private:
     //==========================================================================
     // Controls.
     //==========================================================================
-    MentalsUI::LabelledSlider roomSizeSlider, dampingSlider, widthSlider, preDelaySlider;
+    MentalsUI::LabelledSlider roomSizeSlider, dampingSlider, widthSlider, preDelaySlider, shimmerSlider;
     MentalsUI::LabelledFader mixSlider; // dry/wet blend reads more naturally as a fader than a knob
     juce::ToggleButton freezeToggle { "Freeze" };
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
-        roomSizeAttachment, dampingAttachment, widthAttachment, mixAttachment, preDelayAttachment;
+        roomSizeAttachment, dampingAttachment, widthAttachment, mixAttachment, preDelayAttachment, shimmerAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> freezeAttachment;
 
     juce::Label outputMeterLabel;

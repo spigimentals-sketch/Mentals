@@ -125,6 +125,7 @@ MentalsReverbAudioProcessorEditor::MentalsReverbAudioProcessorEditor (MentalsRev
     widthSlider.addToParent    ("Width",      *this);
     mixSlider.addToParent      ("Mix",        *this);
     preDelaySlider.addToParent ("Pre-Delay",  *this);
+    shimmerSlider.addToParent  ("Shimmer",    *this);
 
     freezeToggle.setColour (juce::ToggleButton::textColourId, MentalsUI::Colours::white);
     freezeToggle.setColour (juce::ToggleButton::tickColourId, MentalsUI::Colours::white);
@@ -147,6 +148,8 @@ MentalsReverbAudioProcessorEditor::MentalsReverbAudioProcessorEditor (MentalsRev
         processor.apvts, "mix", mixSlider.slider);
     preDelayAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processor.apvts, "preDelayMs", preDelaySlider.slider);
+    shimmerAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        processor.apvts, "shimmerAmount", shimmerSlider.slider);
     freezeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         processor.apvts, "freeze", freezeToggle);
 
@@ -264,7 +267,7 @@ void MentalsReverbAudioProcessorEditor::resized()
     p.removeFromTop (20); // headroom for each knob's attachToComponent label above it
 
     juce::Array<juce::Component*> knobs { &roomSizeSlider.slider, &dampingSlider.slider, &widthSlider.slider,
-                                           &mixSlider.slider, &preDelaySlider.slider, &outputMeter };
+                                           &mixSlider.slider, &preDelaySlider.slider, &shimmerSlider.slider, &outputMeter };
     const int cellWidth = p.getWidth() / (knobs.size() + 1); // +1 reserves a cell for the Freeze toggle
     for (auto* knob : knobs)
         knob->setBounds (p.removeFromLeft (cellWidth).reduced (8, 0));
