@@ -55,14 +55,14 @@ private:
     MentalsStereoShaperAudioProcessor& processor;
 
     //==========================================================================
-    // Top bar: shared MENTALS wordmark + product name, Phase Align / Mix
-    // Analysis Assist (both global, not tied to any one band, hence living
-    // here rather than in the knob panel), preset select/save.
+    // Top bar: shared MENTALS wordmark + product name, Phase Align / AI
+    // Placement (both global, not tied to any one band, hence living here
+    // rather than in the knob panel), preset select/save.
     //==========================================================================
     juce::ImageComponent logoImage;
     juce::Label productNameLabel;
     juce::TextButton phaseAlignButton { "Phase Align" };
-    juce::TextButton aiAssistButton   { "Mix Analysis" };
+    juce::TextButton aiAssistButton   { "AI Placement" };
     juce::ComboBox presetSelector;
     juce::TextButton presetSaveButton { "Save" };
 

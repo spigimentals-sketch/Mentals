@@ -187,7 +187,7 @@ void MentalsStereoShaperAudioProcessorEditor::buttonClicked (juce::Button* butto
     if (button == &presetSaveButton)
         promptToSavePreset();
     else if (button == &aiAssistButton)
-        processor.runMixAnalysisAssist();
+        processor.runAiPlacement();
 }
 
 void MentalsStereoShaperAudioProcessorEditor::comboBoxChanged (juce::ComboBox* box)

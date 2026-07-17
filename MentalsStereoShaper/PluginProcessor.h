@@ -2,6 +2,8 @@
 
 #include <JuceHeader.h>
 #include "MentalsUI.h"
+#include "MixRegistry.h"
+#include "PlacementModel.h"
 #include <array>
 #include <atomic>
 
@@ -20,6 +22,15 @@
 //   from the *previous* block's output correlation -> Mid gain trim applied
 //   to Mid -> Mid/Side decode -> stereo-field rotation (manual angle plus an
 //   optional continuously-running auto-rotate LFO) -> dry/wet Mix.
+//
+// AI Placement (see PlacementModel.h/MixRegistry.h): every instance
+// publishes a slowly-smoothed fingerprint of its own raw input (band-energy
+// ratios, crest factor, RMS, L/R correlation) into a cross-process shared
+// registry every block, and can read every OTHER instance's fingerprint on
+// demand. Pressing the button runs a RandomForest (trained on real
+// MUSDB18HQ multitrack songs -- see Models/README.md) on this track's own
+// fingerprint plus that aggregate context, suggesting a Rotation/Width that
+// accounts for what else is already occupying the stereo field.
 //==============================================================================
 class MentalsStereoShaperAudioProcessor : public juce::AudioProcessor
 {
@@ -59,12 +70,15 @@ public:
             param->setValueNotifyingHost (param->getDefaultValue());
     }
 
-    // Rule-based mix-analysis assist (not a trained model, unlike Mentals
-    // Autotune's onnxruntime-backed AI Assist): reads the same smoothed
-    // correlation/band-energy figures the analyzer displays and nudges Width/
-    // the three band Widths toward values that suit what's actually in the
-    // signal right now. Safe to call from the message thread at any time.
-    void runMixAnalysisAssist();
+    // AI Placement: a trained model (see PlacementModel.h), unlike Mentals
+    // Autotune's single-track AI Assist, this one is mix-aware -- every
+    // Stereo Shaper instance publishes its own track's audio fingerprint
+    // into a shared cross-process registry every block (see MixRegistry.h)
+    // and reads every OTHER instance's published fingerprint back, so the
+    // model sees not just this track but what's already occupying the
+    // stereo field elsewhere in the session. Safe to call from the message
+    // thread at any time.
+    void runAiPlacement();
 
     // Output level meter (see MentalsUI::LevelMeterComponent).
     float getOutputPeakDb() const noexcept { return juce::Decibels::gainToDecibels (outputPeakLinear.load(), -100.0f); }
@@ -150,13 +164,36 @@ private:
 
     ThreeBandSplitter sideSplitter;
 
+    // A second splitter, fixed at the same 150Hz/4000Hz points the Python
+    // training pipeline used (independent of the user-adjustable Low/High
+    // Freq width-shaping knobs above), analysing the raw MONO input so the
+    // published "own fingerprint" matches what the model was trained on.
+    ThreeBandSplitter fingerprintSplitter;
+    static constexpr float fingerprintLowFreq = 150.0f, fingerprintHighFreq = 4000.0f;
+
     float rotationAngleRad = 0.0f; // running phase for the auto-rotate LFO, persists across blocks
     float envelopeFollowerState = 0.0f;
     float attackCoeff = 0.0f, releaseCoeff = 0.0f;
     float phaseSafetyScale = 1.0f; // applied to Side this block, derived from last block's correlation
 
     std::atomic<float> smoothedCorrelation { 1.0f };
-    std::atomic<float> lowSideEnergy { 0.0f }, midSideEnergy { 0.0f }, highSideEnergy { 0.0f };
+
+    // Slowly-smoothed (multi-second) "own fingerprint" state, published to
+    // mixRegistry every block and fed to the AI Placement model -- smoothed
+    // much more heavily than the analyzer/meter figures above since this is
+    // meant to characterise the track's overall character (matching the
+    // 8-second analysis windows the model was trained on), not respond
+    // quickly like a meter.
+    float fingerprintLowEnergy = 0.0f, fingerprintMidEnergy = 0.0f, fingerprintHighEnergy = 0.0f;
+    float fingerprintPeak = 0.0f, fingerprintRmsSquared = 0.0f, fingerprintCorrelation = 0.0f;
+
+    // Mirrors what's published to mixRegistry each block, so runAiPlacement()
+    // (called from the message thread, when the user presses the button) can
+    // read the latest values without recomputing anything.
+    std::array<std::atomic<float>, MixRegistry::numOwnFeatures> ownFeatureAtomics {};
+
+    MixRegistry mixRegistry;
+    PlacementModel placementModel;
 
     std::array<std::atomic<float>, goniometerSize> goniometerL, goniometerR;
     std::atomic<int> goniometerWritePos { 0 };

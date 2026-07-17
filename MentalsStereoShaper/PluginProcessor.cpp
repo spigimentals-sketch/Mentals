@@ -120,6 +120,13 @@ void MentalsStereoShaperAudioProcessor::prepareToPlay (double sampleRate, int sa
     sideSplitter.reset();
     sideSplitter.lastFreq1 = sideSplitter.lastFreq2 = -1.0f; // force a coefficient recompute on first block
 
+    fingerprintSplitter.reset();
+    fingerprintSplitter.lastFreq1 = fingerprintSplitter.lastFreq2 = -1.0f; // force a coefficient recompute even if the sample rate changed
+    fingerprintSplitter.updateIfNeeded (sampleRate, fingerprintLowFreq, fingerprintHighFreq);
+    fingerprintLowEnergy = fingerprintMidEnergy = fingerprintHighEnergy = 0.0f;
+    fingerprintPeak = fingerprintRmsSquared = 0.0f;
+    fingerprintCorrelation = 0.0f;
+
     rotationAngleRad = 0.0f;
     envelopeFollowerState = 0.0f;
     phaseSafetyScale = 1.0f;
@@ -128,9 +135,6 @@ void MentalsStereoShaperAudioProcessor::prepareToPlay (double sampleRate, int sa
     releaseCoeff = 1.0f - std::exp (-1.0f / (envelopeReleaseSeconds * (float) sampleRate));
 
     smoothedCorrelation.store (1.0f);
-    lowSideEnergy.store (0.0f);
-    midSideEnergy.store (0.0f);
-    highSideEnergy.store (0.0f);
 
     for (auto& a : goniometerL) a.store (0.0f);
     for (auto& a : goniometerR) a.store (0.0f);
@@ -177,21 +181,36 @@ void MentalsStereoShaperAudioProcessor::processBlock (juce::AudioBuffer<float>& 
     const float autoRateIncrement = twoPi * autoRateHz / (float) currentSampleRate;
 
     double sumLR = 0.0, sumLL = 0.0, sumRR = 0.0;
-    double sumLow2 = 0.0, sumMid2 = 0.0, sumHigh2 = 0.0;
     int gPos = goniometerWritePos.load (std::memory_order_relaxed);
+
+    // "Own fingerprint" accumulators -- describe this track's raw INPUT
+    // (before any width/rotation processing), matching what
+    // extract_features.py computed from each real stem for training.
+    double sumInLR = 0.0, sumInLL = 0.0, sumInRR = 0.0;
+    double sumFpLow2 = 0.0, sumFpMid2 = 0.0, sumFpHigh2 = 0.0, sumFpMono2 = 0.0;
+    float fpPeak = 0.0f;
 
     for (int n = 0; n < numSamples; ++n)
     {
         const float L = left[n];
         const float R = right[n];
 
+        sumInLR += (double) L * R;
+        sumInLL += (double) L * L;
+        sumInRR += (double) R * R;
+
+        const float fpMono = 0.5f * (L + R);
+        const auto fpBands = fingerprintSplitter.process (fpMono);
+        sumFpLow2  += (double) fpBands[0] * fpBands[0];
+        sumFpMid2  += (double) fpBands[1] * fpBands[1];
+        sumFpHigh2 += (double) fpBands[2] * fpBands[2];
+        sumFpMono2 += (double) fpMono * fpMono;
+        fpPeak = juce::jmax (fpPeak, std::abs (fpMono));
+
         const float mid  = 0.5f * (L + R);
         const float side = 0.5f * (L - R);
 
         const auto bands = sideSplitter.process (side);
-        sumLow2  += (double) bands[0] * bands[0];
-        sumMid2  += (double) bands[1] * bands[1];
-        sumHigh2 += (double) bands[2] * bands[2];
 
         float shapedSide = bands[0] * lowWidthScale + bands[1] * midWidthScale + bands[2] * highWidthScale;
 
@@ -250,10 +269,6 @@ void MentalsStereoShaperAudioProcessor::processBlock (juce::AudioBuffer<float>& 
     const float newCorrelation = previousCorrelation * 0.7f + blockCorrelation * 0.3f;
     smoothedCorrelation.store (newCorrelation);
 
-    lowSideEnergy.store (lowSideEnergy.load() * 0.7f + (float) sumLow2 * 0.3f);
-    midSideEnergy.store (midSideEnergy.load() * 0.7f + (float) sumMid2 * 0.3f);
-    highSideEnergy.store (highSideEnergy.load() * 0.7f + (float) sumHigh2 * 0.3f);
-
     if (phaseAlignOn && newCorrelation < correlationSafetyThreshold)
     {
         const float target = juce::jmap (newCorrelation, -1.0f, correlationSafetyThreshold, minSafetyScale, 1.0f);
@@ -262,6 +277,43 @@ void MentalsStereoShaperAudioProcessor::processBlock (juce::AudioBuffer<float>& 
     else
     {
         phaseSafetyScale += (1.0f - phaseSafetyScale) * 0.2f;
+    }
+
+    // Heavily-smoothed (multi-second) "own fingerprint", published to
+    // mixRegistry for every OTHER Stereo Shaper instance to read, and read
+    // back by runAiPlacement() for this instance's own AI Placement call.
+    {
+        const float blockLow  = (float) (sumFpLow2  / numSamples);
+        const float blockMid  = (float) (sumFpMid2  / numSamples);
+        const float blockHigh = (float) (sumFpHigh2 / numSamples);
+        const float blockRms2 = (float) (sumFpMono2 / numSamples);
+        constexpr float fpSmooth = 0.05f; // slow blend -- a multi-second characterisation, not a fast meter
+
+        fingerprintLowEnergy  += (blockLow  - fingerprintLowEnergy)  * fpSmooth;
+        fingerprintMidEnergy  += (blockMid  - fingerprintMidEnergy)  * fpSmooth;
+        fingerprintHighEnergy += (blockHigh - fingerprintHighEnergy) * fpSmooth;
+        fingerprintRmsSquared += (blockRms2 - fingerprintRmsSquared) * fpSmooth;
+        fingerprintPeak       += (fpPeak    - fingerprintPeak)       * fpSmooth;
+
+        const double inDenom = std::sqrt (sumInLL * sumInRR) + 1.0e-9;
+        const float blockInCorrelation = (float) juce::jlimit (-1.0, 1.0, sumInLR / inDenom);
+        fingerprintCorrelation += (blockInCorrelation - fingerprintCorrelation) * fpSmooth;
+
+        const float fpTotal = fingerprintLowEnergy + fingerprintMidEnergy + fingerprintHighEnergy + 1.0e-12f;
+        const float rms = std::sqrt (fingerprintRmsSquared) + 1.0e-9f;
+
+        std::array<float, MixRegistry::numOwnFeatures> ownFeatures;
+        ownFeatures[MixRegistry::featureLowRatio]         = fingerprintLowEnergy / fpTotal;
+        ownFeatures[MixRegistry::featureMidRatio]         = fingerprintMidEnergy / fpTotal;
+        ownFeatures[MixRegistry::featureHighRatio]        = fingerprintHighEnergy / fpTotal;
+        ownFeatures[MixRegistry::featureCrestFactorDb]    = 20.0f * std::log10 (fingerprintPeak / rms + 1.0e-9f);
+        ownFeatures[MixRegistry::featureRmsDb]             = 20.0f * std::log10 (rms);
+        ownFeatures[MixRegistry::featureInputCorrelation] = fingerprintCorrelation;
+
+        for (int i = 0; i < MixRegistry::numOwnFeatures; ++i)
+            ownFeatureAtomics[(size_t) i].store (ownFeatures[(size_t) i], std::memory_order_relaxed);
+
+        mixRegistry.publish (ownFeatures, rotationParam->get(), widthParam->get());
     }
 
     updateOutputLevelMeter (buffer);
@@ -284,28 +336,22 @@ void MentalsStereoShaperAudioProcessor::updateOutputLevelMeter (const juce::Audi
 }
 
 //==============================================================================
-void MentalsStereoShaperAudioProcessor::runMixAnalysisAssist()
+void MentalsStereoShaperAudioProcessor::runAiPlacement()
 {
-    const float correlation = smoothedCorrelation.load();
-    const float low = lowSideEnergy.load(), mid = midSideEnergy.load(), high = highSideEnergy.load();
-    const float total = low + mid + high + 1.0e-9f;
-    const float lowFrac = low / total;
-    const float highFrac = high / total;
+    std::array<float, MixRegistry::numOwnFeatures> ownFeatures;
+    for (int i = 0; i < MixRegistry::numOwnFeatures; ++i)
+        ownFeatures[(size_t) i] = ownFeatureAtomics[(size_t) i].load (std::memory_order_relaxed);
 
-    const float suggestedLowWidth  = lowFrac > 0.35f ? 20.0f : 60.0f;
-    const float suggestedMidWidth  = 100.0f;
-    const float suggestedHighWidth = highFrac > 0.20f ? 150.0f : 110.0f;
-    const float suggestedWidth     = correlation > 0.7f ? 130.0f : (correlation < 0.2f ? 90.0f : 110.0f);
+    const auto context = mixRegistry.computeContext();
+    const auto suggestion = placementModel.predict (ownFeatures, context);
 
     auto apply = [] (juce::AudioParameterFloat* p, float value)
     {
         p->setValueNotifyingHost (p->convertTo0to1 (value));
     };
 
-    apply (lowWidthParam,  suggestedLowWidth);
-    apply (midWidthParam,  suggestedMidWidth);
-    apply (highWidthParam, suggestedHighWidth);
-    apply (widthParam,     suggestedWidth);
+    apply (rotationParam, juce::jlimit (-180.0f, 180.0f, suggestion.rotationDeg));
+    apply (widthParam,    juce::jlimit (0.0f, 200.0f, suggestion.widthPercent));
 }
 
 //==============================================================================
