@@ -22,6 +22,7 @@
 #include "../MentalsExciterEQ/PluginProcessor.h"
 #include "../MentalsCircuitComp/PluginProcessor.h"
 #include "../MentalsMasteringMeter/PluginProcessor.h"
+#include "../MentalsChannelStrip/PluginProcessor.h"
 #include "MasterAssistant.h"
 
 #include <memory>
@@ -106,6 +107,7 @@ public:
         moduleExciterEQ,
         moduleCircuitComp,
         moduleMasteringMeter,
+        moduleChannelStrip,
         numModuleTypes
     };
 

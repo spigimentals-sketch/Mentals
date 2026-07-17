@@ -167,6 +167,20 @@ namespace
                 g.strokePath (needle, stroke);
                 break;
             }
+            case Module::moduleChannelStrip:
+            {
+                // Three small fader strips at different heights -- the one
+                // glyph that doesn't reduce to "an EQ curve" or "a dynamics
+                // bar chart" alone, since this module is both at once.
+                for (int i = 0; i < 3; ++i)
+                {
+                    const float fx = x0 + w * (0.22f + (float) i * 0.28f);
+                    g.drawVerticalLine ((int) fx, y0 + h * 0.1f, y1 - h * 0.1f);
+                    const float capY = y1 - h * (0.25f + (float) i * 0.22f);
+                    g.fillRoundedRectangle (fx - w * 0.09f, capY - h * 0.06f, w * 0.18f, h * 0.12f, 1.0f);
+                }
+                break;
+            }
             case Module::moduleDeEsser:
             default:
             {
