@@ -65,6 +65,7 @@ add_subdirectory(MentalsExciterEQ)
 add_subdirectory(MentalsCircuitComp)
 add_subdirectory(MentalsMasteringMeter)
 add_subdirectory(MentalsChannelStrip)
+add_subdirectory(MentalsMaximizer)
 
 # ----------------------------------------------------------------------------
 # Mentals Suite chains the plugins above together in one instance -- added

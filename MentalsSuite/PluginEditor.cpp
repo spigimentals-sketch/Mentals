@@ -181,6 +181,19 @@ namespace
                 }
                 break;
             }
+            case Module::moduleMaximizer:
+            {
+                // A rising wave pushed flat against a ceiling line -- the
+                // brick-wall-against-a-true-peak-ceiling shape this module's
+                // whole job is built around.
+                p.startNewSubPath (x0, y1 - h * 0.12f);
+                p.cubicTo (x0 + w * 0.25f, y0 + h * 0.15f, x0 + w * 0.35f, y0 + h * 0.22f, x0 + w * 0.5f, y0 + h * 0.22f);
+                p.lineTo (x1 - w * 0.1f, y0 + h * 0.22f);
+                g.strokePath (p, stroke);
+                g.setColour (colour.withAlpha (0.5f));
+                g.drawHorizontalLine ((int) (y0 + h * 0.22f), x0, x1);
+                break;
+            }
             case Module::moduleDeEsser:
             default:
             {

@@ -23,6 +23,7 @@
 #include "../MentalsCircuitComp/PluginProcessor.h"
 #include "../MentalsMasteringMeter/PluginProcessor.h"
 #include "../MentalsChannelStrip/PluginProcessor.h"
+#include "../MentalsMaximizer/PluginProcessor.h"
 #include "MasterAssistant.h"
 
 #include <memory>
@@ -108,6 +109,7 @@ public:
         moduleCircuitComp,
         moduleMasteringMeter,
         moduleChannelStrip,
+        moduleMaximizer,
         numModuleTypes
     };
 
