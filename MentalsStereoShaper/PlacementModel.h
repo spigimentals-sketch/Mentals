@@ -2,6 +2,8 @@
 
 #include <onnxruntime_cxx_api.h>
 #include "MixRegistry.h"
+#include <optional>
+#include <memory>
 
 //==============================================================================
 // Wraps the trained ONNX model behind Stereo Shaper's "AI Placement" --
@@ -24,6 +26,18 @@
 // instance currently active anywhere on the machine -- the same numbers
 // the Python training script computed from a song's other real stems, so
 // the live input distribution matches what the model was trained on.
+//
+// Loading and running the model can both throw (a corrupt/incompatible
+// embedded model, a missing or blocked onnxruntime runtime library, an
+// execution-provider failure, etc.), so both the constructor and predict()
+// swallow any exception rather than let it propagate: this class is a
+// member of MentalsStereoShaperAudioProcessor, constructed unconditionally
+// whenever a Stereo Shaper instance is created -- including reactively,
+// in-process, when Mentals Suite loads one into its chain -- so an
+// uncaught exception here would silently take down whatever hosts it, not
+// just this one feature. isReady()/predict() returning no suggestion just
+// means "AI Placement unavailable"; the rest of the plugin works normally
+// either way.
 //==============================================================================
 class PlacementModel
 {
@@ -36,11 +50,13 @@ public:
 
     PlacementModel();
 
-    Suggestion predict (const std::array<float, MixRegistry::numOwnFeatures>& ownFeatures,
-                         const MixRegistry::AggregateContext& context);
+    bool isReady() const noexcept { return rotationSession != nullptr && widthSession != nullptr; }
+
+    std::optional<Suggestion> predict (const std::array<float, MixRegistry::numOwnFeatures>& ownFeatures,
+                                        const MixRegistry::AggregateContext& context);
 
 private:
-    Ort::Env env;
-    Ort::Session rotationSession;
-    Ort::Session widthSession;
+    std::unique_ptr<Ort::Env> env;
+    std::unique_ptr<Ort::Session> rotationSession;
+    std::unique_ptr<Ort::Session> widthSession;
 };

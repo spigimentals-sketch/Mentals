@@ -72,15 +72,27 @@ target_link_libraries(MentalsStereoShaper
         MentalsStereoShaperCore)
 
 # ----------------------------------------------------------------------------
-# onnxruntime.dll is a runtime dependency (imported SHARED library, not
-# statically linked), so each built format needs its own copy sitting next
-# to the binary -- JUCE creates one target per FORMATS entry above.
+# onnxruntime.dll/.dylib is a runtime dependency (imported SHARED library,
+# not statically linked), so each built format needs its own copy sitting
+# next to the binary -- JUCE creates one target per FORMATS entry above.
+# AU is included alongside VST3/Standalone since it's a real target on
+# macOS (the only platform AU builds on) and was previously missing here,
+# which would have left the AU component without the dylib it needs.
+#
+# On macOS the copy alone isn't enough: the dynamic loader also needs to be
+# told to look next to the executable for @rpath-referenced libraries, so
+# BUILD_RPATH is set to @loader_path there too -- harmless on top of
+# whatever install name the vendored dylib itself already has.
 # ----------------------------------------------------------------------------
-foreach (mentals_stereo_shaper_format VST3 Standalone)
+foreach (mentals_stereo_shaper_format VST3 Standalone AU)
     if (TARGET MentalsStereoShaper_${mentals_stereo_shaper_format})
         add_custom_command(TARGET MentalsStereoShaper_${mentals_stereo_shaper_format} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "$<TARGET_FILE:onnxruntime>"
                 "$<TARGET_FILE_DIR:MentalsStereoShaper_${mentals_stereo_shaper_format}>")
+        if (APPLE)
+            set_target_properties(MentalsStereoShaper_${mentals_stereo_shaper_format} PROPERTIES
+                BUILD_RPATH "@loader_path")
+        endif()
     endif()
 endforeach()

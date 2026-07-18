@@ -1,6 +1,8 @@
 #pragma once
 
 #include <onnxruntime_cxx_api.h>
+#include <optional>
+#include <memory>
 
 //==============================================================================
 // Wraps the two small ONNX models behind AI Assist: a regressor predicting
@@ -20,6 +22,19 @@
 // mean, the same measure computeStabilityScore() already uses elsewhere).
 // No new DSP capture is needed -- applySuggestedVocalSettings() already
 // has the semitone buffer these are computed from.
+//
+// Loading and running the model can both throw (a corrupt/incompatible
+// embedded model, a missing or blocked onnxruntime runtime library, an
+// execution-provider failure, etc. -- exactly the kind of thing that can
+// differ across machines and can't be ruled out here), so both the
+// constructor and predict() swallow any exception rather than let it
+// propagate: this class is a member of MentalsAutotuneAudioProcessor,
+// constructed unconditionally whenever an Autotune instance is created --
+// including reactively, in-process, when Mentals Suite loads one into its
+// chain -- so an uncaught exception here would silently take down
+// whatever hosts it, not just this one feature. isReady()/predict()
+// returning no suggestion just means "AI Assist unavailable"; the rest of
+// the plugin works normally either way.
 //==============================================================================
 class AiAssistModel
 {
@@ -33,10 +48,12 @@ public:
 
     AiAssistModel();
 
-    Suggestion predict (float avgAbsDelta, float pitchRange, float stdDevSemitone);
+    bool isReady() const noexcept { return regressorSession != nullptr && classifierSession != nullptr; }
+
+    std::optional<Suggestion> predict (float avgAbsDelta, float pitchRange, float stdDevSemitone);
 
 private:
-    Ort::Env env;
-    Ort::Session regressorSession;
-    Ort::Session classifierSession;
+    std::unique_ptr<Ort::Env> env;
+    std::unique_ptr<Ort::Session> regressorSession;
+    std::unique_ptr<Ort::Session> classifierSession;
 };

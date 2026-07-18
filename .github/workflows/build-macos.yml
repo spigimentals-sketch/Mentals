@@ -48,6 +48,19 @@ jobs:
             ln -s "$(ls libonnxruntime.*.dylib | head -1)" libonnxruntime.dylib
           fi
 
+          # Force this dylib's own install name to a portable @rpath form,
+          # whatever it shipped with (often an absolute build-machine path
+          # on prebuilt release binaries) -- every Mentals target that
+          # links it sets BUILD_RPATH=@loader_path and copies this file
+          # right next to its own executable (see each plugin's
+          # CMakeLists.txt), so @rpath/libonnxruntime.dylib always resolves.
+          # Without this, the app can fail to launch at all with a
+          # "Library not loaded" dyld error and no on-screen crash dialog.
+          # install_name_tool follows the libonnxruntime.dylib symlink to
+          # the real, versioned file underneath -- no need to resolve it
+          # ourselves.
+          install_name_tool -id "@rpath/libonnxruntime.dylib" libonnxruntime.dylib
+
       - name: Install Ninja
         run: brew install ninja
 

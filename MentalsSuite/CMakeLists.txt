@@ -59,15 +59,29 @@ target_link_libraries(MentalsSuite
         juce::juce_recommended_warning_flags)
 
 # ----------------------------------------------------------------------------
-# onnxruntime.dll is a runtime dependency of MentalsAutotuneCore (Autotune's
-# AI Assist), pulled in transitively here -- same copy step as Autotune's own
-# CMakeLists.txt.
+# onnxruntime.dll/.dylib is a runtime dependency of MentalsAutotuneCore/
+# MentalsStereoShaperCore (Autotune's AI Assist, Stereo Shaper's AI
+# Placement), pulled in transitively here -- same copy step as their own
+# CMakeLists.txt files. AU is included alongside VST3/Standalone since it's
+# a real target on macOS (the only platform AU builds on) and was
+# previously missing here, which would have left Suite's AU component
+# without the dylib it needs whenever it constructs one of those two
+# modules.
+#
+# On macOS the copy alone isn't enough: the dynamic loader also needs to be
+# told to look next to the executable for @rpath-referenced libraries, so
+# BUILD_RPATH is set to @loader_path there too -- harmless on top of
+# whatever install name the vendored dylib itself already has.
 # ----------------------------------------------------------------------------
-foreach (mentals_suite_format VST3 Standalone)
+foreach (mentals_suite_format VST3 Standalone AU)
     if (TARGET MentalsSuite_${mentals_suite_format})
         add_custom_command(TARGET MentalsSuite_${mentals_suite_format} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy_if_different
                 "$<TARGET_FILE:onnxruntime>"
                 "$<TARGET_FILE_DIR:MentalsSuite_${mentals_suite_format}>")
+        if (APPLE)
+            set_target_properties(MentalsSuite_${mentals_suite_format} PROPERTIES
+                BUILD_RPATH "@loader_path")
+        endif()
     endif()
 endforeach()

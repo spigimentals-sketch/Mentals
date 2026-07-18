@@ -344,14 +344,16 @@ void MentalsStereoShaperAudioProcessor::runAiPlacement()
 
     const auto context = mixRegistry.computeContext();
     const auto suggestion = placementModel.predict (ownFeatures, context);
+    if (! suggestion.has_value())
+        return; // AI Placement model unavailable on this machine -- nothing to apply
 
     auto apply = [] (juce::AudioParameterFloat* p, float value)
     {
         p->setValueNotifyingHost (p->convertTo0to1 (value));
     };
 
-    apply (rotationParam, juce::jlimit (-180.0f, 180.0f, suggestion.rotationDeg));
-    apply (widthParam,    juce::jlimit (0.0f, 200.0f, suggestion.widthPercent));
+    apply (rotationParam, juce::jlimit (-180.0f, 180.0f, suggestion->rotationDeg));
+    apply (widthParam,    juce::jlimit (0.0f, 200.0f, suggestion->widthPercent));
 }
 
 //==============================================================================

@@ -492,13 +492,15 @@ bool MentalsAutotuneAudioProcessor::applySuggestedVocalSettings()
     // three numbers -- avgAbsDelta, pitchRange, stdDevSemitone -- that this
     // feature's original heuristic formula used.
     const auto suggestion = aiAssistModel.predict (avgAbsDelta, pitchRange, stdDevSemitone);
+    if (! suggestion.has_value())
+        return false; // AI Assist model unavailable on this machine -- nothing to apply
 
-    retuneSpeedParam->setValueNotifyingHost (retuneSpeedParam->convertTo0to1 (suggestion.retuneMs));
-    amountParam->setValueNotifyingHost (amountParam->convertTo0to1 (suggestion.amount));
+    retuneSpeedParam->setValueNotifyingHost (retuneSpeedParam->convertTo0to1 (suggestion->retuneMs));
+    amountParam->setValueNotifyingHost (amountParam->convertTo0to1 (suggestion->amount));
 
-    lastSuggestedRetuneMs.store (suggestion.retuneMs);
-    lastSuggestedAmount.store (suggestion.amount);
-    lastAnalysisLabelIndex.store (suggestion.labelIndex);
+    lastSuggestedRetuneMs.store (suggestion->retuneMs);
+    lastSuggestedAmount.store (suggestion->amount);
+    lastAnalysisLabelIndex.store (suggestion->labelIndex);
 
     return true;
 }
