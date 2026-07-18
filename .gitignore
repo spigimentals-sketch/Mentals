@@ -5,3 +5,9 @@ ThirdParty/onnxruntime/
 *.user
 .vs/
 .claude/
+
+# Local packaging output (Windows installer build/staging) -- not source,
+# and the generated .iss embeds this machine's own absolute paths, so it
+# isn't portable. The macOS side is built and packaged by CI instead (see
+# .github/workflows/build-macos.yml).
+installer/

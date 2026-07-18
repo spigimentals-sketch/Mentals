@@ -1,0 +1,73 @@
+name: Build macOS Plugins
+
+# Builds every Mentals plugin (AU + VST3 + Standalone) on a real macOS
+# runner and packages the result into a .dmg -- this is the CI path this
+# project uses to get genuine Mac binaries, since AU can only ever be
+# built on macOS with Xcode, and there's no Mac in the primary Windows
+# development environment this codebase is otherwise built on.
+#
+# Apple Silicon (arm64) only: the ONNX Runtime release this project vendors
+# (v1.27.1, see the top-level CMakeLists.txt) only ships an osx-arm64
+# binary, not a universal2 one, and Autotune's AI Assist / Stereo Shaper's
+# AI Placement both link it in unconditionally -- so a universal (Intel +
+# Apple Silicon) build isn't possible from this exact vendored version
+# without a more involved per-target-architecture override. macos-14
+# runners are themselves Apple Silicon hardware, so this is a native (not
+# cross-compiled) build covering every Mac from 2020 onward.
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch: {}
+
+jobs:
+  build-macos:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Clone JUCE (pinned to the version vendored locally)
+        run: git clone --depth 1 --branch 8.0.14 https://github.com/juce-framework/JUCE.git JUCE
+
+      - name: Fetch ONNX Runtime (macOS arm64, v1.27.1)
+        run: |
+          set -euo pipefail
+          curl -L -o onnxruntime-macos.tgz \
+            https://github.com/microsoft/onnxruntime/releases/download/v1.27.1/onnxruntime-osx-arm64-1.27.1.tgz
+          mkdir -p ThirdParty/onnxruntime
+          tar -xzf onnxruntime-macos.tgz -C ThirdParty/onnxruntime --strip-components=1
+          rm onnxruntime-macos.tgz
+
+          # The release tarball ships a versioned .dylib (and usually a
+          # symlink already) -- make sure the unversioned name
+          # CMakeLists.txt expects definitely resolves, regardless of
+          # exactly how a given release version names things.
+          cd ThirdParty/onnxruntime/lib
+          if [ ! -e libonnxruntime.dylib ]; then
+            ln -s "$(ls libonnxruntime.*.dylib | head -1)" libonnxruntime.dylib
+          fi
+
+      - name: Install Ninja
+        run: brew install ninja
+
+      - name: Configure CMake
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+
+      - name: Build all plugins (AU + VST3 + Standalone)
+        run: cmake --build build --config Release -j "$(sysctl -n hw.ncpu)"
+
+      - name: Package into a DMG
+        run: |
+          chmod +x package_macos_dmg.sh
+          ./package_macos_dmg.sh
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MentalsPlugins-macOS
+          path: installer/output/*.dmg

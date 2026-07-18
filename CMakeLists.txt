@@ -18,17 +18,28 @@ add_subdirectory(JUCE)
 # couple of small RandomForest graphs.
 #
 # Not committed to the repo (same as JUCE/ -- see .gitignore): re-extract
-# the "onnxruntime-win-x64-<version>.zip" asset from
+# the platform-matching release asset from
 # https://github.com/microsoft/onnxruntime/releases (this was set up
 # against v1.27.1) into ThirdParty/onnxruntime/, keeping its include/ and
-# lib/ subfolders; the .pdb debug symbol files aren't needed and were
-# deleted to save space (some 380MB+ each).
+# lib/ subfolders -- "onnxruntime-win-x64-<version>.zip" on Windows,
+# "onnxruntime-osx-universal2-<version>.tgz" on macOS (see
+# .github/workflows/build-macos.yml, which fetches the latter
+# automatically for CI). The .pdb/.dSYM debug symbol files aren't needed
+# and were deleted to save space (some 380MB+ each on Windows).
 # ----------------------------------------------------------------------------
 add_library(onnxruntime SHARED IMPORTED GLOBAL)
-set_target_properties(onnxruntime PROPERTIES
-    IMPORTED_LOCATION "${CMAKE_SOURCE_DIR}/ThirdParty/onnxruntime/lib/onnxruntime.dll"
-    IMPORTED_IMPLIB   "${CMAKE_SOURCE_DIR}/ThirdParty/onnxruntime/lib/onnxruntime.lib"
-    INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/ThirdParty/onnxruntime/include")
+if (WIN32)
+    set_target_properties(onnxruntime PROPERTIES
+        IMPORTED_LOCATION "${CMAKE_SOURCE_DIR}/ThirdParty/onnxruntime/lib/onnxruntime.dll"
+        IMPORTED_IMPLIB   "${CMAKE_SOURCE_DIR}/ThirdParty/onnxruntime/lib/onnxruntime.lib"
+        INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/ThirdParty/onnxruntime/include")
+elseif (APPLE)
+    set_target_properties(onnxruntime PROPERTIES
+        IMPORTED_LOCATION "${CMAKE_SOURCE_DIR}/ThirdParty/onnxruntime/lib/libonnxruntime.dylib"
+        INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_SOURCE_DIR}/ThirdParty/onnxruntime/include")
+else()
+    message(FATAL_ERROR "No vendored ONNX Runtime binary configured for this platform yet.")
+endif()
 
 # ----------------------------------------------------------------------------
 # Shared UI library: the colour palette, level meter, splitter bar, labelled
