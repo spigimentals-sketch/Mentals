@@ -1,5 +1,6 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <functional>
 
 //==============================================================================
 MentalsReverbAudioProcessor::MentalsReverbAudioProcessor()
@@ -238,17 +239,137 @@ void MentalsReverbAudioProcessor::updateOutputLevelMeter (const juce::AudioBuffe
 }
 
 //==============================================================================
+// Per-preset-name existence check (not "is the whole library empty") so
+// this can keep adding newly-introduced factory presets on top of an
+// older install without ever touching a preset (factory or user-saved)
+// that's already on disk under that name -- e.g. "Shimmer" was this
+// plugin's only factory preset before the rest below were added.
 void MentalsReverbAudioProcessor::seedFactoryPresetsIfMissing()
 {
-    if (! presetManager.getAvailablePresetNames().isEmpty())
-        return;
+    const auto presetsDir = presetManager.getPresetsDirectory();
 
-    auto apply = [] (juce::AudioParameterFloat* p, float value) { p->setValueNotifyingHost (p->convertTo0to1 (value)); };
+    struct Settings
+    {
+        float roomSize = 50.0f, damping = 50.0f, width = 100.0f, mix = 30.0f, preDelayMs = 20.0f, shimmerAmount = 0.0f;
+    };
 
-    resetToDefault();
-    apply (roomSizeParam, 85.0f); apply (dampingParam, 20.0f); apply (widthParam, 100.0f);
-    apply (mixParam, 45.0f); apply (preDelayMsParam, 30.0f); apply (shimmerAmountParam, 65.0f);
-    presetManager.savePreset ("Shimmer");
+    auto applyPreset = [this, &presetsDir] (const juce::String& name, std::function<void (Settings&)> configure)
+    {
+        if (presetsDir.getChildFile (name + ".xml").existsAsFile())
+            return; // never overwrite a preset (factory or user-saved) already on disk under this name
+
+        Settings s;
+        configure (s);
+
+        resetToDefault();
+        auto apply = [] (juce::AudioParameterFloat* p, float value) { p->setValueNotifyingHost (p->convertTo0to1 (value)); };
+        apply (roomSizeParam, s.roomSize); apply (dampingParam, s.damping); apply (widthParam, s.width);
+        apply (mixParam, s.mix); apply (preDelayMsParam, s.preDelayMs); apply (shimmerAmountParam, s.shimmerAmount);
+        presetManager.savePreset (name);
+    };
+
+    applyPreset ("Shimmer", [] (Settings& s)
+    {
+        s.roomSize = 85.0f; s.damping = 20.0f; s.width = 100.0f;
+        s.mix = 45.0f; s.preDelayMs = 30.0f; s.shimmerAmount = 65.0f;
+    });
+
+    // ---- Classic reverb types -----------------------------------------------------
+    applyPreset ("Hall", [] (Settings& s)
+    {
+        s.roomSize = 80.0f; s.damping = 35.0f; s.width = 100.0f; s.mix = 35.0f; s.preDelayMs = 25.0f;
+    });
+
+    applyPreset ("Chamber", [] (Settings& s)
+    {
+        s.roomSize = 55.0f; s.damping = 45.0f; s.width = 90.0f; s.mix = 30.0f; s.preDelayMs = 15.0f;
+    });
+
+    applyPreset ("Room", [] (Settings& s)
+    {
+        s.roomSize = 30.0f; s.damping = 50.0f; s.width = 80.0f; s.mix = 25.0f; s.preDelayMs = 8.0f;
+    });
+
+    applyPreset ("Plate", [] (Settings& s)
+    {
+        s.roomSize = 45.0f; s.damping = 15.0f; s.width = 100.0f; s.mix = 28.0f; s.preDelayMs = 5.0f;
+    });
+
+    applyPreset ("Spring", [] (Settings& s)
+    {
+        s.roomSize = 20.0f; s.damping = 60.0f; s.width = 60.0f; s.mix = 30.0f; s.preDelayMs = 0.0f;
+    });
+
+    // ---- Vocal-specific ------------------------------------------------------------
+    applyPreset ("Lead Vox", [] (Settings& s)
+    {
+        s.roomSize = 40.0f; s.damping = 45.0f; s.width = 85.0f; s.mix = 20.0f; s.preDelayMs = 35.0f;
+    });
+
+    applyPreset ("BGV", [] (Settings& s)
+    {
+        s.roomSize = 60.0f; s.damping = 40.0f; s.width = 100.0f; s.mix = 40.0f; s.preDelayMs = 15.0f; s.shimmerAmount = 5.0f;
+    });
+
+    applyPreset ("Afro Vox", [] (Settings& s)
+    {
+        // Bright, present, vibrant space with a touch of shimmer for air --
+        // the spacious-but-forward vocal reverb character common in
+        // Afrobeats/Amapiano vocal chains, rather than a dark, washy hall.
+        s.roomSize = 55.0f; s.damping = 20.0f; s.width = 100.0f; s.mix = 35.0f; s.preDelayMs = 20.0f; s.shimmerAmount = 15.0f;
+    });
+
+    // ---- Large venues ---------------------------------------------------------------
+    applyPreset ("Concert", [] (Settings& s)
+    {
+        s.roomSize = 95.0f; s.damping = 30.0f; s.width = 100.0f; s.mix = 40.0f; s.preDelayMs = 40.0f;
+    });
+
+    applyPreset ("Church", [] (Settings& s)
+    {
+        s.roomSize = 90.0f; s.damping = 20.0f; s.width = 100.0f; s.mix = 45.0f; s.preDelayMs = 45.0f;
+    });
+
+    applyPreset ("Cathedral", [] (Settings& s)
+    {
+        s.roomSize = 100.0f; s.damping = 15.0f; s.width = 100.0f; s.mix = 55.0f; s.preDelayMs = 60.0f; s.shimmerAmount = 10.0f;
+    });
+
+    // ---- Other practical starting points --------------------------------------------
+    applyPreset ("Vocal Booth", [] (Settings& s)
+    {
+        s.roomSize = 10.0f; s.damping = 60.0f; s.width = 50.0f; s.mix = 12.0f; s.preDelayMs = 0.0f;
+    });
+
+    applyPreset ("Drum Room", [] (Settings& s)
+    {
+        s.roomSize = 35.0f; s.damping = 55.0f; s.width = 90.0f; s.mix = 20.0f; s.preDelayMs = 5.0f;
+    });
+
+    applyPreset ("Studio Live Room", [] (Settings& s)
+    {
+        s.roomSize = 45.0f; s.damping = 40.0f; s.width = 90.0f; s.mix = 25.0f; s.preDelayMs = 10.0f;
+    });
+
+    applyPreset ("Podcast Voice", [] (Settings& s)
+    {
+        s.roomSize = 15.0f; s.damping = 55.0f; s.width = 60.0f; s.mix = 8.0f; s.preDelayMs = 0.0f;
+    });
+
+    applyPreset ("Master Bus Glue", [] (Settings& s)
+    {
+        s.roomSize = 25.0f; s.damping = 50.0f; s.width = 100.0f; s.mix = 6.0f; s.preDelayMs = 0.0f;
+    });
+
+    applyPreset ("Guitar Amp Spring", [] (Settings& s)
+    {
+        s.roomSize = 15.0f; s.damping = 65.0f; s.width = 40.0f; s.mix = 25.0f; s.preDelayMs = 0.0f;
+    });
+
+    applyPreset ("Ethereal Wash", [] (Settings& s)
+    {
+        s.roomSize = 100.0f; s.damping = 10.0f; s.width = 100.0f; s.mix = 60.0f; s.preDelayMs = 30.0f; s.shimmerAmount = 80.0f;
+    });
 
     resetToDefault();
 }
