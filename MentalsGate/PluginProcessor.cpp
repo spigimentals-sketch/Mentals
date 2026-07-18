@@ -16,6 +16,8 @@ MentalsGateAudioProcessor::MentalsGateAudioProcessor()
     rangeParam        = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("range"));
     mixParam          = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("mix"));
     useSidechainParam = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("useSidechain"));
+
+    seedFactoryPresetsIfMissing();
 }
 
 //==============================================================================
@@ -183,4 +185,47 @@ void MentalsGateAudioProcessor::setStateInformation (const void* data, int sizeI
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         presetManager.applyStateXml (*xml);
+}
+
+//==============================================================================
+// Factory presets: common per-source gating starting points.
+//==============================================================================
+void MentalsGateAudioProcessor::seedFactoryPresetsIfMissing()
+{
+    if (! presetManager.getAvailablePresetNames().isEmpty())
+        return;
+
+    auto applyF = [] (juce::AudioParameterFloat* p, float value) { p->setValueNotifyingHost (p->convertTo0to1 (value)); };
+
+    resetToDefault();
+    applyF (thresholdParam, -30.0f); applyF (ratioParam, 8.0f); applyF (attackParam, 0.3f);
+    applyF (releaseParam, 80.0f); applyF (rangeParam, -40.0f);
+    presetManager.savePreset ("Kick Gate");
+
+    resetToDefault();
+    applyF (thresholdParam, -32.0f); applyF (ratioParam, 6.0f); applyF (attackParam, 0.3f);
+    applyF (releaseParam, 120.0f); applyF (rangeParam, -30.0f);
+    presetManager.savePreset ("Snare Gate");
+
+    resetToDefault();
+    applyF (thresholdParam, -28.0f); applyF (ratioParam, 8.0f); applyF (attackParam, 0.5f);
+    applyF (releaseParam, 150.0f); applyF (rangeParam, -35.0f);
+    presetManager.savePreset ("Tom Isolation");
+
+    resetToDefault();
+    applyF (thresholdParam, -35.0f); applyF (ratioParam, 6.0f); applyF (attackParam, 0.5f);
+    applyF (releaseParam, 100.0f); applyF (rangeParam, -30.0f);
+    presetManager.savePreset ("Drum Bus Tighten");
+
+    resetToDefault();
+    applyF (thresholdParam, -45.0f); applyF (ratioParam, 2.5f); applyF (attackParam, 3.0f);
+    applyF (releaseParam, 200.0f); applyF (rangeParam, -18.0f);
+    presetManager.savePreset ("Vocal Breath Control");
+
+    resetToDefault();
+    applyF (thresholdParam, -50.0f); applyF (ratioParam, 4.0f); applyF (attackParam, 1.0f);
+    applyF (releaseParam, 150.0f); applyF (rangeParam, -25.0f);
+    presetManager.savePreset ("Guitar Amp Noise Gate");
+
+    resetToDefault();
 }

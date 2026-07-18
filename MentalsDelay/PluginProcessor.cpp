@@ -14,6 +14,8 @@ MentalsDelayAudioProcessor::MentalsDelayAudioProcessor()
     pingPongParam    = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("pingPong"));
     lowCutParam      = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("lowCut"));
     highCutParam     = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("highCut"));
+
+    seedFactoryPresetsIfMissing();
 }
 
 //==============================================================================
@@ -201,5 +203,52 @@ void MentalsDelayAudioProcessor::setStateInformation (const void* data, int size
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         presetManager.applyStateXml (*xml);
+}
+
+//==============================================================================
+// Factory presets: common delay-style starting points -- millisecond values
+// picked to land on musical divisions at a plain 120bpm (250ms = an eighth
+// note, 375ms = a dotted eighth, 500ms = a quarter) since this delay has no
+// tempo-sync of its own.
+//==============================================================================
+void MentalsDelayAudioProcessor::seedFactoryPresetsIfMissing()
+{
+    if (! presetManager.getAvailablePresetNames().isEmpty())
+        return;
+
+    auto applyF = [] (juce::AudioParameterFloat* p, float value) { p->setValueNotifyingHost (p->convertTo0to1 (value)); };
+    auto applyB = [] (juce::AudioParameterBool* p, bool value) { p->setValueNotifyingHost (value ? 1.0f : 0.0f); };
+
+    resetToDefault();
+    applyF (delayTimeMsParam, 90.0f); applyF (feedbackParam, 5.0f); applyF (mixParam, 25.0f);
+    applyB (pingPongParam, false); applyF (lowCutParam, 200.0f); applyF (highCutParam, 6000.0f);
+    presetManager.savePreset ("Slapback");
+
+    resetToDefault();
+    applyF (delayTimeMsParam, 280.0f); applyF (feedbackParam, 20.0f); applyF (mixParam, 20.0f);
+    applyB (pingPongParam, false); applyF (lowCutParam, 300.0f); applyF (highCutParam, 5000.0f);
+    presetManager.savePreset ("Vocal Ambience");
+
+    resetToDefault();
+    applyF (delayTimeMsParam, 375.0f); applyF (feedbackParam, 40.0f); applyF (mixParam, 35.0f);
+    applyB (pingPongParam, true); applyF (lowCutParam, 150.0f); applyF (highCutParam, 7000.0f);
+    presetManager.savePreset ("Ping-Pong Stereo");
+
+    resetToDefault();
+    applyF (delayTimeMsParam, 500.0f); applyF (feedbackParam, 55.0f); applyF (mixParam, 40.0f);
+    applyB (pingPongParam, false); applyF (lowCutParam, 200.0f); applyF (highCutParam, 3500.0f);
+    presetManager.savePreset ("Dub Echo");
+
+    resetToDefault();
+    applyF (delayTimeMsParam, 250.0f); applyF (feedbackParam, 30.0f); applyF (mixParam, 30.0f);
+    applyB (pingPongParam, false); applyF (lowCutParam, 150.0f); applyF (highCutParam, 8000.0f);
+    presetManager.savePreset ("Eighth Note Groove");
+
+    resetToDefault();
+    applyF (delayTimeMsParam, 650.0f); applyF (feedbackParam, 65.0f); applyF (mixParam, 45.0f);
+    applyB (pingPongParam, true); applyF (lowCutParam, 250.0f); applyF (highCutParam, 4000.0f);
+    presetManager.savePreset ("Ambient Wash");
+
+    resetToDefault();
 }
 

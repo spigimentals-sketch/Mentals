@@ -82,6 +82,7 @@ public:
 
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+    void seedFactoryPresetsIfMissing();
     void updateOutputLevelMeter (const juce::AudioBuffer<float>& buffer);
 
     double currentSampleRate = 44100.0;

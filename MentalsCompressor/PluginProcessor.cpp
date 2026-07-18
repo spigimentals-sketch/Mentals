@@ -17,6 +17,8 @@ MentalsCompressorAudioProcessor::MentalsCompressorAudioProcessor()
     makeupGainParam   = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("makeupGain"));
     mixParam          = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("mix"));
     useSidechainParam = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("useSidechain"));
+
+    seedFactoryPresetsIfMissing();
 }
 
 //==============================================================================
@@ -190,4 +192,57 @@ void MentalsCompressorAudioProcessor::setStateInformation (const void* data, int
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         presetManager.applyStateXml (*xml);
+}
+
+//==============================================================================
+// Factory presets: common per-source compression starting points, in the
+// spirit of the source-based preset menus character plugins like Abbey
+// Road's own compressor/bus-glue tools ship -- not a copy of any specific
+// product's exact values, just the same "pick your source, get a sane
+// starting point" idea applied with this compressor's own soft-knee
+// transfer function.
+//==============================================================================
+void MentalsCompressorAudioProcessor::seedFactoryPresetsIfMissing()
+{
+    if (! presetManager.getAvailablePresetNames().isEmpty())
+        return;
+
+    auto applyF = [] (juce::AudioParameterFloat* p, float value) { p->setValueNotifyingHost (p->convertTo0to1 (value)); };
+
+    resetToDefault();
+    applyF (thresholdParam, -20.0f); applyF (ratioParam, 3.0f); applyF (kneeParam, 8.0f);
+    applyF (attackParam, 15.0f); applyF (releaseParam, 120.0f); applyF (makeupGainParam, 3.0f);
+    presetManager.savePreset ("Vocal Leveler");
+
+    resetToDefault();
+    applyF (thresholdParam, -12.0f); applyF (ratioParam, 4.0f); applyF (kneeParam, 4.0f);
+    applyF (attackParam, 20.0f); applyF (releaseParam, 200.0f); applyF (makeupGainParam, 2.0f);
+    presetManager.savePreset ("Drum Bus Glue");
+
+    resetToDefault();
+    applyF (thresholdParam, -18.0f); applyF (ratioParam, 5.0f); applyF (kneeParam, 3.0f);
+    applyF (attackParam, 5.0f); applyF (releaseParam, 100.0f); applyF (makeupGainParam, 3.0f);
+    presetManager.savePreset ("Bass Tighten");
+
+    resetToDefault();
+    applyF (thresholdParam, -8.0f); applyF (ratioParam, 2.0f); applyF (kneeParam, 10.0f);
+    applyF (attackParam, 30.0f); applyF (releaseParam, 300.0f); applyF (makeupGainParam, 1.0f);
+    presetManager.savePreset ("Master Bus Glue");
+
+    resetToDefault();
+    applyF (thresholdParam, -30.0f); applyF (ratioParam, 8.0f); applyF (kneeParam, 2.0f);
+    applyF (attackParam, 1.0f); applyF (releaseParam, 60.0f); applyF (makeupGainParam, 6.0f);
+    presetManager.savePreset ("Punch Parallel");
+
+    resetToDefault();
+    applyF (thresholdParam, -16.0f); applyF (ratioParam, 3.0f); applyF (kneeParam, 8.0f);
+    applyF (attackParam, 10.0f); applyF (releaseParam, 150.0f); applyF (makeupGainParam, 2.0f);
+    presetManager.savePreset ("Acoustic Guitar Smooth");
+
+    resetToDefault();
+    applyF (thresholdParam, -14.0f); applyF (ratioParam, 4.0f); applyF (kneeParam, 3.0f);
+    applyF (attackParam, 2.0f); applyF (releaseParam, 90.0f); applyF (makeupGainParam, 3.0f);
+    presetManager.savePreset ("Snare Snap");
+
+    resetToDefault();
 }

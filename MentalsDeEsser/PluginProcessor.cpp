@@ -21,6 +21,8 @@ MentalsDeEsserAudioProcessor::MentalsDeEsserAudioProcessor()
     maxReductionParam = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("maxReduction"));
     mixParam          = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("mix"));
     listenParam       = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("listen"));
+
+    seedFactoryPresetsIfMissing();
 }
 
 //==============================================================================
@@ -208,4 +210,42 @@ void MentalsDeEsserAudioProcessor::setStateInformation (const void* data, int si
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         presetManager.applyStateXml (*xml);
+}
+
+//==============================================================================
+// Factory presets: common vocal-type de-essing starting points.
+//==============================================================================
+void MentalsDeEsserAudioProcessor::seedFactoryPresetsIfMissing()
+{
+    if (! presetManager.getAvailablePresetNames().isEmpty())
+        return;
+
+    auto applyF = [] (juce::AudioParameterFloat* p, float value) { p->setValueNotifyingHost (p->convertTo0to1 (value)); };
+
+    resetToDefault();
+    applyF (frequencyParam, 5500.0f); applyF (thresholdParam, -22.0f); applyF (ratioParam, 4.0f);
+    applyF (attackParam, 1.0f); applyF (releaseParam, 60.0f); applyF (maxReductionParam, 10.0f);
+    presetManager.savePreset ("Male Vocal");
+
+    resetToDefault();
+    applyF (frequencyParam, 7500.0f); applyF (thresholdParam, -20.0f); applyF (ratioParam, 5.0f);
+    applyF (attackParam, 0.5f); applyF (releaseParam, 50.0f); applyF (maxReductionParam, 12.0f);
+    presetManager.savePreset ("Female Vocal");
+
+    resetToDefault();
+    applyF (frequencyParam, 6000.0f); applyF (thresholdParam, -26.0f); applyF (ratioParam, 3.0f);
+    applyF (attackParam, 2.0f); applyF (releaseParam, 80.0f); applyF (maxReductionParam, 8.0f);
+    presetManager.savePreset ("Broadcast Podcast");
+
+    resetToDefault();
+    applyF (frequencyParam, 6500.0f); applyF (thresholdParam, -18.0f); applyF (ratioParam, 8.0f);
+    applyF (attackParam, 0.3f); applyF (releaseParam, 40.0f); applyF (maxReductionParam, 18.0f);
+    presetManager.savePreset ("Aggressive");
+
+    resetToDefault();
+    applyF (frequencyParam, 7000.0f); applyF (thresholdParam, -28.0f); applyF (ratioParam, 2.0f);
+    applyF (attackParam, 3.0f); applyF (releaseParam, 100.0f); applyF (maxReductionParam, 5.0f);
+    presetManager.savePreset ("Gentle Smoothing");
+
+    resetToDefault();
 }

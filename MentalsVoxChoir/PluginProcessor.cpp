@@ -16,6 +16,8 @@ MentalsVoxChoirAudioProcessor::MentalsVoxChoirAudioProcessor()
     timingParam  = dynamic_cast<juce::AudioParameterFloat*>  (apvts.getParameter ("timing"));
     spreadParam  = dynamic_cast<juce::AudioParameterFloat*>  (apvts.getParameter ("spread"));
     mixParam     = dynamic_cast<juce::AudioParameterFloat*>  (apvts.getParameter ("mix"));
+
+    seedFactoryPresetsIfMissing();
 }
 
 //==============================================================================
@@ -208,4 +210,49 @@ void MentalsVoxChoirAudioProcessor::setStateInformation (const void* data, int s
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         presetManager.applyStateXml (*xml);
+}
+
+//==============================================================================
+// Factory presets: common ensemble-size/character starting points. voices
+// choice indices: 0="4", 1="8", 2="16", 3="32".
+//==============================================================================
+void MentalsVoxChoirAudioProcessor::seedFactoryPresetsIfMissing()
+{
+    if (! presetManager.getAvailablePresetNames().isEmpty())
+        return;
+
+    auto applyF = [] (juce::AudioParameterFloat* p, float value) { p->setValueNotifyingHost (p->convertTo0to1 (value)); };
+    auto applyChoice = [] (juce::AudioParameterChoice* p, int index) { p->setValueNotifyingHost (p->convertTo0to1 ((float) index)); };
+
+    resetToDefault();
+    applyChoice (voicesParam, 0); applyF (vibratoParam, 30.0f); applyF (pitchParam, 25.0f);
+    applyF (timingParam, 25.0f); applyF (spreadParam, 60.0f); applyF (mixParam, 80.0f);
+    presetManager.savePreset ("Small Group (4)");
+
+    resetToDefault();
+    applyChoice (voicesParam, 1); applyF (vibratoParam, 20.0f); applyF (pitchParam, 20.0f);
+    applyF (timingParam, 20.0f); applyF (spreadParam, 50.0f); applyF (mixParam, 70.0f);
+    presetManager.savePreset ("Tight Backing Vocals (8)");
+
+    resetToDefault();
+    applyChoice (voicesParam, 2); applyF (vibratoParam, 40.0f); applyF (pitchParam, 40.0f);
+    applyF (timingParam, 40.0f); applyF (spreadParam, 85.0f); applyF (mixParam, 100.0f);
+    presetManager.savePreset ("Choir (16)");
+
+    resetToDefault();
+    applyChoice (voicesParam, 2); applyF (vibratoParam, 60.0f); applyF (pitchParam, 60.0f);
+    applyF (timingParam, 45.0f); applyF (spreadParam, 100.0f); applyF (mixParam, 100.0f);
+    presetManager.savePreset ("Ethereal Wide Pad (16)");
+
+    resetToDefault();
+    applyChoice (voicesParam, 3); applyF (vibratoParam, 45.0f); applyF (pitchParam, 50.0f);
+    applyF (timingParam, 50.0f); applyF (spreadParam, 100.0f); applyF (mixParam, 100.0f);
+    presetManager.savePreset ("Massive Choir (32)");
+
+    resetToDefault();
+    applyChoice (voicesParam, 0); applyF (vibratoParam, 15.0f); applyF (pitchParam, 15.0f);
+    applyF (timingParam, 15.0f); applyF (spreadParam, 40.0f); applyF (mixParam, 50.0f);
+    presetManager.savePreset ("Subtle Double (4)");
+
+    resetToDefault();
 }

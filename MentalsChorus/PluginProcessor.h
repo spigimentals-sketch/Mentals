@@ -76,6 +76,7 @@ public:
 
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+    void seedFactoryPresetsIfMissing();
     void updateOutputLevelMeter (const juce::AudioBuffer<float>& buffer);
     static float readInterpolated (const std::vector<float>& buffer, int writePos, float delaySamples);
 

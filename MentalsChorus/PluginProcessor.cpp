@@ -13,6 +13,8 @@ MentalsChorusAudioProcessor::MentalsChorusAudioProcessor()
     delayParam    = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("delay"));
     feedbackParam = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("feedback"));
     mixParam      = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("mix"));
+
+    seedFactoryPresetsIfMissing();
 }
 
 //==============================================================================
@@ -183,4 +185,47 @@ void MentalsChorusAudioProcessor::setStateInformation (const void* data, int siz
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         presetManager.applyStateXml (*xml);
+}
+
+//==============================================================================
+// Factory presets: common chorus-character starting points.
+//==============================================================================
+void MentalsChorusAudioProcessor::seedFactoryPresetsIfMissing()
+{
+    if (! presetManager.getAvailablePresetNames().isEmpty())
+        return;
+
+    auto applyF = [] (juce::AudioParameterFloat* p, float value) { p->setValueNotifyingHost (p->convertTo0to1 (value)); };
+
+    resetToDefault();
+    applyF (rateParam, 0.3f); applyF (depthParam, 2.0f); applyF (delayParam, 12.0f);
+    applyF (feedbackParam, 0.0f); applyF (mixParam, 25.0f);
+    presetManager.savePreset ("Subtle Shimmer");
+
+    resetToDefault();
+    applyF (rateParam, 0.8f); applyF (depthParam, 5.0f); applyF (delayParam, 15.0f);
+    applyF (feedbackParam, 10.0f); applyF (mixParam, 50.0f);
+    presetManager.savePreset ("Classic Chorus");
+
+    resetToDefault();
+    applyF (rateParam, 0.6f); applyF (depthParam, 4.0f); applyF (delayParam, 18.0f);
+    applyF (feedbackParam, 15.0f); applyF (mixParam, 40.0f);
+    presetManager.savePreset ("Guitar Ensemble");
+
+    resetToDefault();
+    applyF (rateParam, 0.4f); applyF (depthParam, 3.0f); applyF (delayParam, 20.0f);
+    applyF (feedbackParam, 5.0f); applyF (mixParam, 35.0f);
+    presetManager.savePreset ("Wide Vocal Double");
+
+    resetToDefault();
+    applyF (rateParam, 1.5f); applyF (depthParam, 8.0f); applyF (delayParam, 10.0f);
+    applyF (feedbackParam, 25.0f); applyF (mixParam, 55.0f);
+    presetManager.savePreset ("Deep Sweep");
+
+    resetToDefault();
+    applyF (rateParam, 0.25f); applyF (depthParam, 6.0f); applyF (delayParam, 22.0f);
+    applyF (feedbackParam, 20.0f); applyF (mixParam, 60.0f);
+    presetManager.savePreset ("Synth Pad Motion");
+
+    resetToDefault();
 }

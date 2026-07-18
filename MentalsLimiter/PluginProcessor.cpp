@@ -13,6 +13,8 @@ MentalsLimiterAudioProcessor::MentalsLimiterAudioProcessor()
     releaseParam   = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("release"));
     mixParam       = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("mix"));
     truePeakParam  = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("truePeak"));
+
+    seedFactoryPresetsIfMissing();
 }
 
 //==============================================================================
@@ -223,4 +225,50 @@ void MentalsLimiterAudioProcessor::setStateInformation (const void* data, int si
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         presetManager.applyStateXml (*xml);
+}
+
+//==============================================================================
+// Factory presets: common mastering/bus-limiting starting points. True Peak
+// is left on for every one of these -- see the class comment on why that's
+// this plugin's own recommended default.
+//==============================================================================
+void MentalsLimiterAudioProcessor::seedFactoryPresetsIfMissing()
+{
+    if (! presetManager.getAvailablePresetNames().isEmpty())
+        return;
+
+    auto applyF = [] (juce::AudioParameterFloat* p, float value) { p->setValueNotifyingHost (p->convertTo0to1 (value)); };
+    auto applyB = [] (juce::AudioParameterBool* p, bool value) { p->setValueNotifyingHost (value ? 1.0f : 0.0f); };
+
+    resetToDefault();
+    applyF (inputGainParam, 2.0f); applyF (ceilingParam, -0.3f); applyF (releaseParam, 150.0f);
+    applyF (mixParam, 100.0f); applyB (truePeakParam, true);
+    presetManager.savePreset ("Mastering Transparent");
+
+    resetToDefault();
+    applyF (inputGainParam, 6.0f); applyF (ceilingParam, -0.1f); applyF (releaseParam, 80.0f);
+    applyF (mixParam, 100.0f); applyB (truePeakParam, true);
+    presetManager.savePreset ("Loud and Safe");
+
+    resetToDefault();
+    applyF (inputGainParam, 4.0f); applyF (ceilingParam, -1.0f); applyF (releaseParam, 100.0f);
+    applyF (mixParam, 100.0f); applyB (truePeakParam, true);
+    presetManager.savePreset ("Streaming Loudness");
+
+    resetToDefault();
+    applyF (inputGainParam, 3.0f); applyF (ceilingParam, -0.3f); applyF (releaseParam, 50.0f);
+    applyF (mixParam, 90.0f); applyB (truePeakParam, true);
+    presetManager.savePreset ("Drum Bus Punch");
+
+    resetToDefault();
+    applyF (inputGainParam, 0.0f); applyF (ceilingParam, -0.3f); applyF (releaseParam, 200.0f);
+    applyF (mixParam, 100.0f); applyB (truePeakParam, true);
+    presetManager.savePreset ("Gentle Safety Ceiling");
+
+    resetToDefault();
+    applyF (inputGainParam, 3.0f); applyF (ceilingParam, -2.0f); applyF (releaseParam, 120.0f);
+    applyF (mixParam, 100.0f); applyB (truePeakParam, true);
+    presetManager.savePreset ("Broadcast Safe");
+
+    resetToDefault();
 }

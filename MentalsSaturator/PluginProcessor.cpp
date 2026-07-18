@@ -13,6 +13,8 @@ MentalsSaturatorAudioProcessor::MentalsSaturatorAudioProcessor()
     toneParam       = dynamic_cast<juce::AudioParameterFloat*>  (apvts.getParameter ("tone"));
     outputGainParam = dynamic_cast<juce::AudioParameterFloat*>  (apvts.getParameter ("outputGain"));
     mixParam        = dynamic_cast<juce::AudioParameterFloat*>  (apvts.getParameter ("mix"));
+
+    seedFactoryPresetsIfMissing();
 }
 
 //==============================================================================
@@ -142,4 +144,54 @@ void MentalsSaturatorAudioProcessor::setStateInformation (const void* data, int 
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
         presetManager.applyStateXml (*xml);
+}
+
+//==============================================================================
+// Factory presets: common colouration starting points across the four
+// circuit types (Soft Clip=0, Hard Clip=1, Tube=2, Foldback=3).
+//==============================================================================
+void MentalsSaturatorAudioProcessor::seedFactoryPresetsIfMissing()
+{
+    if (! presetManager.getAvailablePresetNames().isEmpty())
+        return;
+
+    auto applyF = [] (juce::AudioParameterFloat* p, float value) { p->setValueNotifyingHost (p->convertTo0to1 (value)); };
+    auto applyChoice = [] (juce::AudioParameterChoice* p, int index) { p->setValueNotifyingHost (p->convertTo0to1 ((float) index)); };
+
+    resetToDefault();
+    applyF (driveParam, 10.0f); applyChoice (typeParam, 2); applyF (toneParam, 65.0f);
+    applyF (outputGainParam, 0.0f); applyF (mixParam, 100.0f);
+    presetManager.savePreset ("Tube Warmth");
+
+    resetToDefault();
+    applyF (driveParam, 8.0f); applyChoice (typeParam, 0); applyF (toneParam, 60.0f);
+    applyF (outputGainParam, 0.0f); applyF (mixParam, 100.0f);
+    presetManager.savePreset ("Tape-Style Glue");
+
+    resetToDefault();
+    applyF (driveParam, 6.0f); applyChoice (typeParam, 2); applyF (toneParam, 75.0f);
+    applyF (outputGainParam, 0.0f); applyF (mixParam, 60.0f);
+    presetManager.savePreset ("Vocal Presence");
+
+    resetToDefault();
+    applyF (driveParam, 18.0f); applyChoice (typeParam, 1); applyF (toneParam, 55.0f);
+    applyF (outputGainParam, -1.0f); applyF (mixParam, 45.0f);
+    presetManager.savePreset ("Drum Bus Crunch");
+
+    resetToDefault();
+    applyF (driveParam, 15.0f); applyChoice (typeParam, 2); applyF (toneParam, 40.0f);
+    applyF (outputGainParam, 0.0f); applyF (mixParam, 70.0f);
+    presetManager.savePreset ("Bass Grit");
+
+    resetToDefault();
+    applyF (driveParam, 30.0f); applyChoice (typeParam, 3); applyF (toneParam, 50.0f);
+    applyF (outputGainParam, -3.0f); applyF (mixParam, 50.0f);
+    presetManager.savePreset ("Aggressive Foldback FX");
+
+    resetToDefault();
+    applyF (driveParam, 4.0f); applyChoice (typeParam, 0); applyF (toneParam, 65.0f);
+    applyF (outputGainParam, 0.0f); applyF (mixParam, 35.0f);
+    presetManager.savePreset ("Master Bus Subtle");
+
+    resetToDefault();
 }
