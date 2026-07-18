@@ -1,12 +1,15 @@
 #pragma once
 
-#ifndef NOMINMAX
-#define NOMINMAX
+#if defined(_WIN32)
+ #ifndef NOMINMAX
+ #define NOMINMAX
+ #endif
+ #ifndef WIN32_LEAN_AND_MEAN
+ #define WIN32_LEAN_AND_MEAN
+ #endif
+ #include <windows.h>
 #endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <windows.h>
+
 #include <atomic>
 #include <array>
 #include <cstdint>
@@ -22,9 +25,11 @@
 // from analysing a bus that already includes the very track being placed --
 // each track simply reports itself, and reads everyone else's reports.
 //
-// Backed by a named Win32 file mapping (not a JUCE abstraction -- JUCE has
-// no cross-process shared-memory primitive) so it works whether the host
-// loads every plugin in-process or sandboxes each one in its own process.
+// Backed by a named OS-level shared-memory mapping (not a JUCE abstraction
+// -- JUCE has no cross-process shared-memory primitive): a Win32 file
+// mapping on Windows, POSIX shm_open()/mmap() on macOS/Linux -- so it works
+// whether the host loads every plugin in-process or sandboxes each one in
+// its own process.
 // Every field is a lock-free std::atomic living directly in the mapped
 // pages; on x86-64 with MSVC, atomic<float>/atomic<int32_t>/atomic<int64_t>
 // are guaranteed lock-free, so this is safe to touch from the audio thread
@@ -94,7 +99,11 @@ public:
 private:
     bool claimSlot();
 
+#if defined(_WIN32)
     HANDLE mappingHandle = nullptr;
+#else
+    int mappingFd = -1;
+#endif
     SharedMemory* memory = nullptr;
     int ownSlotIndex = -1;
     uint64_t ownerId = 0;

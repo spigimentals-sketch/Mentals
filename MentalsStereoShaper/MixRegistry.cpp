@@ -1,15 +1,38 @@
 #include "MixRegistry.h"
-#include <processthreadsapi.h>
 #include <cmath>
 #include <algorithm>
+#include <chrono>
+
+#if defined(_WIN32)
+ #include <processthreadsapi.h>
+#else
+ #include <sys/mman.h>
+ #include <sys/stat.h>
+ #include <fcntl.h>
+ #include <unistd.h>
+#endif
 
 namespace
 {
+#if defined(_WIN32)
     constexpr wchar_t mappingName[] = L"Local\\MentalsMixRegistry_v1";
+#else
+    constexpr const char* mappingName = "/MentalsMixRegistry_v1";
+#endif
+
+    // Monotonic milliseconds, used identically on every platform for the
+    // slot-staleness timestamps (replaces the Windows-only GetTickCount64
+    // this used to call).
+    int64_t nowMs() noexcept
+    {
+        using namespace std::chrono;
+        return (int64_t) duration_cast<milliseconds> (steady_clock::now().time_since_epoch()).count();
+    }
 }
 
 MixRegistry::MixRegistry()
 {
+#if defined(_WIN32)
     mappingHandle = CreateFileMappingW (INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
                                          0, (DWORD) sizeof (SharedMemory), mappingName);
     if (mappingHandle == nullptr)
@@ -26,13 +49,49 @@ MixRegistry::MixRegistry()
         mappingHandle = nullptr;
         return;
     }
+#else
+    // POSIX equivalent of the Windows named-page-file-mapping trick above:
+    // shm_open gives every process on the machine that asks for this same
+    // name the same underlying memory object; O_CREAT is harmless if
+    // another instance already created it. ftruncate actually sizes (and,
+    // the first time, zero-fills) the object -- a process opening an
+    // already-correctly-sized object is a cheap no-op. Unlike Windows,
+    // nothing here automatically frees the segment when the last process
+    // using it exits (see the destructor for why that's left alone
+    // deliberately), but this class's own stale-slot-aging logic already
+    // makes any leftover state from a previous run harmless either way.
+    mappingFd = shm_open (mappingName, O_CREAT | O_RDWR, 0666);
+    if (mappingFd < 0)
+        return;
+
+    if (ftruncate (mappingFd, (off_t) sizeof (SharedMemory)) != 0)
+    {
+        close (mappingFd);
+        mappingFd = -1;
+        return;
+    }
+
+    memory = static_cast<SharedMemory*> (mmap (nullptr, sizeof (SharedMemory), PROT_READ | PROT_WRITE, MAP_SHARED, mappingFd, 0));
+    if (memory == MAP_FAILED)
+    {
+        memory = nullptr;
+        close (mappingFd);
+        mappingFd = -1;
+        return;
+    }
+#endif
 
     // Unique across processes and across instances within one process:
     // process ID in the high bits, a per-instance counter plus this
     // object's address in the low bits.
     static std::atomic<uint32_t> instanceCounter { 0 };
     const uint32_t low = instanceCounter.fetch_add (1) ^ (uint32_t) reinterpret_cast<uintptr_t> (this);
-    ownerId = ((uint64_t) GetCurrentProcessId() << 32) | (uint64_t) low;
+#if defined(_WIN32)
+    const uint64_t pid = (uint64_t) GetCurrentProcessId();
+#else
+    const uint64_t pid = (uint64_t) getpid();
+#endif
+    ownerId = (pid << 32) | (uint64_t) low;
     if (ownerId == 0)
         ownerId = 1;
 
@@ -44,10 +103,24 @@ MixRegistry::~MixRegistry()
     if (memory != nullptr && ownSlotIndex >= 0)
         memory->slots[ownSlotIndex].ownerId.store (0, std::memory_order_release);
 
+#if defined(_WIN32)
     if (memory != nullptr)
         UnmapViewOfFile (memory);
     if (mappingHandle != nullptr)
         CloseHandle (mappingHandle);
+#else
+    if (memory != nullptr)
+        munmap (memory, sizeof (SharedMemory));
+    if (mappingFd >= 0)
+        close (mappingFd);
+    // Deliberately not shm_unlink()'d -- POSIX shared memory has no
+    // Windows-style "freed once the last handle closes" refcounting, so
+    // unlinking here would yank the segment out from under every other
+    // still-running instance. It's a small, fixed, well-known name that
+    // simply persists (like a lock file would); a fresh process opening it
+    // after everyone else has exited just sees stale slots, which are
+    // already ignored by computeContext()'s own staleness check.
+#endif
 }
 
 bool MixRegistry::claimSlot()
@@ -77,7 +150,7 @@ void MixRegistry::publish (const std::array<float, numOwnFeatures>& ownFeatures,
         slot.features[i].store (ownFeatures[(size_t) i], std::memory_order_relaxed);
     slot.rotationDeg.store (rotationDeg, std::memory_order_relaxed);
     slot.widthPercent.store (widthPercent, std::memory_order_relaxed);
-    slot.lastUpdateMs.store ((int64_t) GetTickCount64(), std::memory_order_release);
+    slot.lastUpdateMs.store (nowMs(), std::memory_order_release);
 }
 
 MixRegistry::AggregateContext MixRegistry::computeContext (int64_t stalenessMs) const
@@ -86,7 +159,7 @@ MixRegistry::AggregateContext MixRegistry::computeContext (int64_t stalenessMs) 
     if (memory == nullptr)
         return ctx;
 
-    const int64_t now = (int64_t) GetTickCount64();
+    const int64_t now = nowMs();
 
     for (int i = 0; i < maxSlots; ++i)
     {
