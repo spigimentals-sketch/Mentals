@@ -14,9 +14,12 @@ name: Build macOS Plugins
 # without a more involved per-target-architecture override. macos-14
 # runners are themselves Apple Silicon hardware, so this is a native (not
 # cross-compiled) build covering every Mac from 2020 onward.
+# Manual trigger only -- deliberately NOT on push. Packaging a .dmg is the
+# last step once a round of fixes is confirmed good, not something that
+# should happen automatically on every push while still iterating on bugs.
+# Run this from the Actions tab (or `gh workflow run build-macos.yml`)
+# once you're ready for a fresh build.
 on:
-  push:
-    branches: [ main, master ]
   workflow_dispatch: {}
 
 jobs:
