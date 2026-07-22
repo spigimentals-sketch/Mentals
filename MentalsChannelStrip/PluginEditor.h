@@ -53,10 +53,17 @@ private:
 
     MentalsChannelStripAudioProcessor& processor;
 
+    MentalsUI::HardwareLookAndFeel hardwareLookAndFeel;
+
+    // Set in resized(), read back in paint() so the metal-panel texture,
+    // corner screws, and rack ears are drawn over exactly the same area the
+    // knobs sit in.
+    juce::Rectangle<int> lastPanelBounds;
+
     //==========================================================================
     // Top bar.
     //==========================================================================
-    juce::ImageComponent logoImage;
+    MentalsUI::MetallicLogoComponent logoImage;
     juce::Label productNameLabel;
     juce::TextButton presetsButton { "Presets" };
     juce::TextButton presetSaveButton { "Save" };
@@ -78,11 +85,11 @@ private:
     //==========================================================================
     juce::Label compLabel { {}, "COMPRESSOR" };
     MentalsUI::LabelledSlider compThresholdSlider, compRatioSlider, compAttackSlider, compReleaseSlider, compMakeupSlider;
-    MentalsUI::GainReductionMeterComponent compGrMeter;
+    MentalsUI::AnalogVUMeterComponent compGrMeter;
 
     juce::Label gateLabel { {}, "GATE / EXPANDER" };
     MentalsUI::LabelledSlider gateThresholdSlider, gateRatioSlider, gateAttackSlider, gateReleaseSlider, gateRangeSlider;
-    MentalsUI::GainReductionMeterComponent gateGrMeter;
+    MentalsUI::AnalogVUMeterComponent gateGrMeter;
 
     juce::TextButton dynamicsInToggle       { "Dyn In" };
     juce::TextButton dynamicsBeforeEqToggle { "Dyn > EQ" };
@@ -111,7 +118,7 @@ private:
     //==========================================================================
     juce::Label outputLabel { {}, "OUTPUT" };
     MentalsUI::LabelledSlider outputGainSlider;
-    MentalsUI::LevelMeterComponent outputMeter;
+    MentalsUI::AnalogVUMeterComponent outputMeter;
 
     // LabelledSlider knobs above own their attachments internally (see
     // rebind()); only the plain TextButton toggles need one here.

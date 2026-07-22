@@ -13,6 +13,7 @@
 #include <atomic>
 #include <array>
 #include <cstdint>
+#include <vector>
 
 //==============================================================================
 // Cross-process "mix blackboard": every Stereo Shaper instance loaded
@@ -95,6 +96,18 @@ public:
     // Not real-time safe (harmless syscalls to read the clock) -- only ever
     // called from the message thread, when the user presses AI Placement.
     AggregateContext computeContext (int64_t stalenessMs = 3000) const;
+
+    // One other currently-active instance's last-published placement, for
+    // the 3D stage's "here's where everything else in the mix sits" view.
+    struct OtherInstance
+    {
+        float rotationDeg, widthPercent;
+        float lowRatio, midRatio, highRatio, rmsDb;
+    };
+
+    // Not real-time safe (harmless syscalls to read the clock) -- only ever
+    // called from the message thread (the editor's display timer).
+    std::vector<OtherInstance> getOthersSnapshot (int64_t stalenessMs = 3000) const;
 
 private:
     bool claimSlot();

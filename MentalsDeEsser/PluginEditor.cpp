@@ -1,6 +1,5 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
-#include "BinaryData.h"
 
 //==============================================================================
 // DeEsserTransferCurveComponent
@@ -54,13 +53,11 @@ void DeEsserTransferCurveComponent::paint (juce::Graphics& g)
 //==============================================================================
 MentalsDeEsserAudioProcessorEditor::MentalsDeEsserAudioProcessorEditor (MentalsDeEsserAudioProcessor& p)
     : AudioProcessorEditor (&p), processor (p), transferCurve (p),
-      gainReductionMeter ([&p] { return p.getGainReductionDb(); }),
-      outputMeter ([&p] { return p.getOutputPeakDb(); }, [&p] { return p.isOutputClipping(); })
+      gainReductionMeter ([&p] { return p.getGainReductionDb(); }, true /* gain-reduction mode -- see MentalsUI::AnalogVUMeterComponent */),
+      outputMeter ([&p] { return p.getOutputPeakDb(); })
 {
-    setLookAndFeel (&MentalsUI::MentalsLookAndFeel::getSharedInstance());
+    setLookAndFeel (&hardwareLookAndFeel);
 
-    logoImage.setImage (juce::ImageFileFormat::loadFrom (BinaryData::mentals_logo_png, (size_t) BinaryData::mentals_logo_pngSize));
-    logoImage.setImagePlacement (juce::RectanglePlacement::centred);
     addAndMakeVisible (logoImage);
 
     productNameLabel.setText ("De-esser", juce::dontSendNotification);
@@ -93,8 +90,6 @@ MentalsDeEsserAudioProcessorEditor::MentalsDeEsserAudioProcessorEditor (MentalsD
     maxReductionSlider.addToParent ("Max Reduction", *this);
     mixSlider.addToParent          ("Mix",           *this);
 
-    listenToggle.setColour (juce::ToggleButton::textColourId, MentalsUI::Colours::white);
-    listenToggle.setColour (juce::ToggleButton::tickColourId, MentalsUI::Colours::white);
     addAndMakeVisible (listenToggle);
 
     gainReductionMeterLabel.setText ("GR", juce::dontSendNotification);
@@ -129,8 +124,8 @@ MentalsDeEsserAudioProcessorEditor::MentalsDeEsserAudioProcessorEditor (MentalsD
         processor.apvts, "listen", listenToggle);
 
     setResizable (true, true);
-    setResizeLimits (620, 560, 1300, 900);
-    setSize (860, 600);
+    setResizeLimits (760, 560, 1300, 900);
+    setSize (980, 620);
 }
 
 MentalsDeEsserAudioProcessorEditor::~MentalsDeEsserAudioProcessorEditor()
@@ -202,16 +197,38 @@ void MentalsDeEsserAudioProcessorEditor::promptToSavePreset()
 
 void MentalsDeEsserAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (MentalsUI::Colours::charcoalBlack);
+    g.fillAll (juce::Colour (0xff0c0c0d));
 
     auto topBarArea = getLocalBounds().removeFromTop (40);
-    g.setColour (MentalsUI::Colours::slateGrayDark);
-    g.fillRect (topBarArea);
+    MentalsUI::HardwareLookAndFeel::drawMetalPanel (g, topBarArea.toFloat());
+
+    if (! lastPanelBounds.isEmpty())
+    {
+        auto panelBoundsF = lastPanelBounds.toFloat();
+        MentalsUI::HardwareLookAndFeel::drawMetalPanel (g, panelBoundsF);
+
+        constexpr float inset = 10.0f;
+        MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getX() + inset, panelBoundsF.getY() + inset });
+        MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getRight() - inset, panelBoundsF.getY() + inset });
+        MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getX() + inset, panelBoundsF.getBottom() - inset });
+        MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getRight() - inset, panelBoundsF.getBottom() - inset });
+    }
+
+    // Bolted rack ears running the full height of the unit, same as Reverb.
+    constexpr float earWidth = 22.0f;
+    auto fullBounds = getLocalBounds().toFloat();
+    MentalsUI::HardwareLookAndFeel::drawRackEar (g, fullBounds.removeFromLeft (earWidth).reduced (2.0f));
+    MentalsUI::HardwareLookAndFeel::drawRackEar (g, fullBounds.removeFromRight (earWidth).reduced (2.0f));
 }
 
 void MentalsDeEsserAudioProcessorEditor::resized()
 {
     auto area = getLocalBounds();
+
+    // Keep all content clear of the rack ears paint() draws at the very
+    // left/right edges (see there).
+    area.removeFromLeft (24);
+    area.removeFromRight (24);
 
     constexpr int topBarHeight   = 40;
     constexpr int splitterHeight = 8;
@@ -235,6 +252,8 @@ void MentalsDeEsserAudioProcessorEditor::resized()
     auto splitterArea = area.removeFromBottom (splitterHeight);
     auto graphArea    = area;
 
+    lastPanelBounds = panelArea;
+
     transferCurve.setBounds (graphArea.reduced (8));
     splitter.setBounds (splitterArea);
 
@@ -251,12 +270,28 @@ void MentalsDeEsserAudioProcessorEditor::resized()
     for (auto* knob : row1Knobs)
         knob->setBounds (row1.removeFromLeft (cellWidth1).reduced (4, 0));
 
+    // Row 2: Max Reduction, Mix, and Listen share whatever width remains
+    // after both meters (kept adjacent, same "one pair of meters" idea as
+    // Reverb's Out/Duck GR) claim their own wider cells.
+    constexpr int meterCellWidth = 200, listenCellWidth = 100;
+    auto meterCell1 = row2.removeFromRight (meterCellWidth);
+    auto meterCell2 = row2.removeFromRight (meterCellWidth);
+    auto listenCell = row2.removeFromRight (listenCellWidth);
+
     row2.removeFromTop (20);
-    juce::Array<juce::Component*> row2Knobs { &maxReductionSlider.slider, &mixSlider.slider,
-                                               &gainReductionMeter, &outputMeter };
-    const int cellWidth2 = row2.getWidth() / (row2Knobs.size() + 1); // +1 reserves a cell for the Listen toggle
+    juce::Array<juce::Component*> row2Knobs { &maxReductionSlider.slider, &mixSlider.slider };
+    const int cellWidth2 = row2.getWidth() / row2Knobs.size();
     for (auto* knob : row2Knobs)
         knob->setBounds (row2.removeFromLeft (cellWidth2).reduced (4, 0));
 
-    listenToggle.setBounds (row2.reduced (8, 0).withHeight (26).withY (row2.getY() + row2.getHeight() / 2 - 13));
+    // meterCell1 is the rightmost cell (removeFromRight was called on it
+    // first) -- Out goes there and GR just to its left, matching Reverb's
+    // "GR ... Out" left-to-right meter order.
+    meterCell1.removeFromTop (20);
+    outputMeter.setBounds (meterCell1.reduced (6, 0));
+
+    meterCell2.removeFromTop (20);
+    gainReductionMeter.setBounds (meterCell2.reduced (6, 0));
+
+    listenToggle.setBounds (listenCell.reduced (8, 0).withHeight (32).withY (listenCell.getY() + listenCell.getHeight() / 2 - 16));
 }

@@ -76,8 +76,16 @@ public:
     // into a shared cross-process registry every block (see MixRegistry.h)
     // and reads every OTHER instance's published fingerprint back, so the
     // model sees not just this track but what's already occupying the
-    // stereo field elsewhere in the session. Safe to call from the message
-    // thread at any time.
+    // stereo field elsewhere in the session.
+    //
+    // The model itself, however, empirically learned ~zero sensitivity to
+    // which SIDE (left/right) is more occupied specifically -- confirmed
+    // against 2,808 real MUSDB18HQ examples, not just a hunch (see
+    // Models/README.md) -- so runAiPlacement() layers an explicit,
+    // deterministic nudge away from the more-crowded side on top of the
+    // model's own rotation suggestion, to make sure "mix-aware" is actually
+    // true in practice rather than just in the feature's name. Safe to call
+    // from the message thread at any time.
     void runAiPlacement();
 
     // Output level meter (see MentalsUI::LevelMeterComponent).
@@ -93,6 +101,12 @@ public:
     const std::atomic<float>& getGoniometerR (int i) const noexcept { return goniometerR[(size_t) i]; }
     int getGoniometerWritePos() const noexcept { return goniometerWritePos.load (std::memory_order_relaxed); }
     float getCorrelation() const noexcept { return smoothedCorrelation.load(); }
+
+    // Every OTHER currently-active Stereo Shaper instance's last-published
+    // placement, for the 3D stage to draw a whole-session view (see
+    // MixRegistry::getOthersSnapshot()). Not real-time safe -- only ever
+    // called from the editor's display timer.
+    std::vector<MixRegistry::OtherInstance> getOtherInstancesSnapshot() const { return mixRegistry.getOthersSnapshot(); }
 
     juce::AudioParameterFloat* widthParam          = nullptr;
     juce::AudioParameterFloat* midGainParam        = nullptr;

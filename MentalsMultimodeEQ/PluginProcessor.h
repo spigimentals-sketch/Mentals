@@ -1,9 +1,12 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include "EqAssistModel.h"
+#include "EqMixRegistry.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <numeric>
 #include <vector>
 #include <map>
 
@@ -443,7 +446,7 @@ public:
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
 
-    const juce::String getName() const override { return "Mentals Multimode EQ"; }
+    const juce::String getName() const override { return "Mentals Parametric EQ"; }
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
@@ -554,18 +557,22 @@ public:
     // any of this plugin's own EQ is applied) for spectral-balance imbalance
     // and narrow resonances, then configures a handful of currently-untouched
     // bands with static Parametric moves for broad tonal correction and
-    // Dynamic moves for resonance suppression.
+    // resonance cutting.
     //
-    // This is a rule-based DSP analysis built on the same FFT machinery as
-    // the spectrum analyser/EQ Match above, not a neural-network model: no
-    // ONNX Runtime/TensorFlow Lite dependency or trained model file is
-    // bundled, since no real trained "spectral balance -> EQ curve" model was
-    // available to source or train for this project. It targets the same
-    // three things a model-based approach would -- spectral-balance
-    // analysis, resonance detection, and adaptive (parametric + dynamic) EQ
-    // moves -- while never touching a band the user has already customised
-    // (see the "available band" check in applyAiAssistSuggestions()'s
-    // definition) and never claiming the two bookend shelf bands.
+    // A hybrid of rule-based DSP analysis and genuinely trained models (see
+    // EqAssistModel.h and Models/README.md for the full pipeline). The
+    // macro-band deviation math for broad tonal correction is still a
+    // disclosed rule-based heuristic built on the same FFT machinery as the
+    // spectrum analyser/EQ Match above -- but its *target* now comes from a
+    // trained instrument-category classifier's reference curve rather than
+    // just this track's own average (see categoryReferenceCurves in the
+    // .cpp), and resonance cutting's (gainDb, Q) -- including masking-aware
+    // and harmonic-aware adjustments via EqMixRegistry and a ported pitch
+    // detector -- is a genuinely trained RandomForestRegressor, not a fixed
+    // Q=5/dynamic-threshold guess. Never touches a band the user has already
+    // customised (see the "available band" check in
+    // applyAiAssistSuggestions()'s definition) and never claims the two
+    // bookend shelf bands.
     //==========================================================================
     void beginAiAssistAnalysis();   // start a ~2s capture of the live input spectrum
     void cancelAiAssistAnalysis();
@@ -717,6 +724,18 @@ private:
     bool aiAssistHasCapture = false;
     mutable juce::SpinLock aiAssistLock;
 
+    // Harmonicity capture: one semitone value per confidently-pitched
+    // frame during the capture (mirrors Autotune's own per-hop pitch
+    // tracking), reduced to a representative frequency + 0-1 stability
+    // once the capture finishes -- see analyseAiAssistPitchFrame() and
+    // Models/README.md. Distinguishing a genuine problem resonance from a
+    // wanted musical note needs to know whether THIS track is actually
+    // playing a stable note right now, and if so, which harmonics of it
+    // are expected to be prominent.
+    std::vector<float> aiAssistPitchSemitones;
+    float aiAssistPitchFreqHz = 0.0f;
+    float aiAssistPitchStability = 0.0f;
+
     // Bands the last applyAiAssistSuggestions() call touched, so
     // undoLastAiAssist() can put them back -- message-thread only (both
     // methods are only ever called from editor button clicks), so this
@@ -725,6 +744,21 @@ private:
     std::vector<AiAssistTouchedBand> aiAssistLastAppliedBands;
 
     void updateAiAssistCapture (const juce::AudioBuffer<float>& buffer);
+
+    // AI Assist's trained models (see EqAssistModel.h) -- constructed once
+    // here rather than lazily, since their embedded ONNX data is always
+    // present and loading it is a one-off cost paid at plugin startup.
+    EqAssistModel eqAssistModel;
+
+    // Masking-aware AI Assist: publishes this instance's own per-band
+    // energy periodically and reads other instances' aggregate on demand
+    // (see EqMixRegistry.h). Constructed unconditionally, like every other
+    // AI Assist member -- its shared-memory setup can fail gracefully
+    // (isReady()-style null checks throughout, no exceptions to catch
+    // since unlike the ONNX models this doesn't throw).
+    EqMixRegistry eqMixRegistry;
+    int samplesSinceLastMixRegistryPublish = 0;
+    std::vector<float> mixRegistryPublishScratch; // sized once in prepareToPlay(), reused to avoid an audio-thread allocation
 
     //==========================================================================
     // Spectrum analyser state (feeds both the GUI display and EQ Match).

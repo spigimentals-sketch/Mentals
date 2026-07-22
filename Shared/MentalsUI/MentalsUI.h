@@ -4,9 +4,12 @@
 // this one header rather than the individual pieces below.
 #include "MentalsColours.h"
 #include "MentalsLookAndFeel.h"
+#include "HardwareLookAndFeel.h"
 #include "LevelMeterComponent.h"
 #include "GainReductionMeterComponent.h"
+#include "AnalogVUMeterComponent.h"
 #include "VuMeterComponent.h"
+#include "MetallicLogoComponent.h"
 #include "SplitterBar.h"
 #include "LabelledSlider.h"
 #include "LabelledFader.h"

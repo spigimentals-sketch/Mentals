@@ -55,10 +55,17 @@ private:
 
     MentalsSaturatorAudioProcessor& processor;
 
+    MentalsUI::HardwareLookAndFeel hardwareLookAndFeel;
+
+    // Set in resized(), read back in paint() so the metal-panel texture,
+    // corner screws, and rack ears are drawn over exactly the same area the
+    // knobs sit in.
+    juce::Rectangle<int> lastPanelBounds;
+
     //==========================================================================
     // Top bar: shared MENTALS wordmark + product name, preset select/save.
     //==========================================================================
-    juce::ImageComponent logoImage;
+    MentalsUI::MetallicLogoComponent logoImage;
     juce::Label productNameLabel;
     juce::ComboBox presetSelector;
     juce::TextButton presetSaveButton { "Save" };
@@ -79,7 +86,7 @@ private:
         driveAttachment, toneAttachment, outputGainAttachment, mixAttachment;
 
     juce::Label outputMeterLabel;
-    MentalsUI::LevelMeterComponent outputMeter;
+    MentalsUI::AnalogVUMeterComponent outputMeter;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MentalsSaturatorAudioProcessorEditor)
 };

@@ -205,3 +205,35 @@ MixRegistry::AggregateContext MixRegistry::computeContext (int64_t stalenessMs) 
 
     return ctx;
 }
+
+std::vector<MixRegistry::OtherInstance> MixRegistry::getOthersSnapshot (int64_t stalenessMs) const
+{
+    std::vector<OtherInstance> result;
+    if (memory == nullptr)
+        return result;
+
+    const int64_t now = nowMs();
+
+    for (int i = 0; i < maxSlots; ++i)
+    {
+        if (i == ownSlotIndex)
+            continue;
+
+        const auto& slot = memory->slots[i];
+        if (slot.ownerId.load (std::memory_order_acquire) == 0)
+            continue;
+        if (now - slot.lastUpdateMs.load (std::memory_order_acquire) > stalenessMs)
+            continue;
+
+        OtherInstance other;
+        other.rotationDeg  = slot.rotationDeg.load (std::memory_order_relaxed);
+        other.widthPercent = slot.widthPercent.load (std::memory_order_relaxed);
+        other.lowRatio     = slot.features[featureLowRatio].load (std::memory_order_relaxed);
+        other.midRatio     = slot.features[featureMidRatio].load (std::memory_order_relaxed);
+        other.highRatio    = slot.features[featureHighRatio].load (std::memory_order_relaxed);
+        other.rmsDb        = slot.features[featureRmsDb].load (std::memory_order_relaxed);
+        result.push_back (other);
+    }
+
+    return result;
+}

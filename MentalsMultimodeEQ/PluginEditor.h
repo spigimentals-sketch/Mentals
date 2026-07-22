@@ -2,7 +2,7 @@
 
 #include <JuceHeader.h>
 #include "PluginProcessor.h"
-#include "MentalsLookAndFeel.h"
+#include "MentalsUI.h"
 
 //==============================================================================
 // Colour palette: charcoal/slate core with electric-blue selection, golden
@@ -286,10 +286,17 @@ private:
     MultiModeEQAudioProcessor& processor;
     int selectedBandIndex = 0;
 
+    MentalsUI::HardwareLookAndFeel hardwareLookAndFeel;
+
+    // Set in resized(), read back in paint() so the metal-panel texture,
+    // corner screws, and rack ears are drawn over exactly the same area the
+    // knobs sit in.
+    juce::Rectangle<int> lastPanelBounds;
+
     //==========================================================================
     // Top bar: compact logo (top left), and preset select/save to its right.
     //==========================================================================
-    juce::ImageComponent logoImage;
+    MentalsUI::MetallicLogoComponent logoImage;
 
     // Opens a folder-style PopupMenu (see showPresetsMenu()) rather than a
     // flat ComboBox list -- factory presets are grouped into category

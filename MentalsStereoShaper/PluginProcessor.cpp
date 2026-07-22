@@ -347,12 +347,35 @@ void MentalsStereoShaperAudioProcessor::runAiPlacement()
     if (! suggestion.has_value())
         return; // AI Placement model unavailable on this machine -- nothing to apply
 
+    // Explicit occupancy-avoidance nudge, layered on top of the trained
+    // model's own rotation suggestion. Empirically (retrained and checked
+    // against 2,808 real MUSDB18HQ examples across 26 songs -- see
+    // Models/README.md), the model shows ~zero learned sensitivity to
+    // leftOccupancy/rightOccupancy specifically: RandomForest feature
+    // importance of exactly 0.0 for both, and a raw correlation of -0.009
+    // between occupancy imbalance and the real placement label. That's not
+    // a bug or a data-volume problem -- real mixing engineers' left/right
+    // placement choices just aren't well-predicted by a simple aggregate
+    // occupancy measure (instrument role/convention dominates instead,
+    // which the model does pick up on). Rather than ship a "mix-aware"
+    // feature that silently ignores the one thing it's meant to be aware
+    // of, a deterministic nudge away from whichever side is currently more
+    // crowded is applied here -- 0 when nothing else is detected
+    // (leftOccupancy == rightOccupancy == 0), growing towards
+    // maxOccupancyNudgeDeg as the imbalance grows.
+    constexpr float maxOccupancyNudgeDeg = 45.0f;
+    constexpr float occupancyNudgeDegPerUnit = 12.0f;
+    const float occupancyImbalance = context.rightOccupancy - context.leftOccupancy;
+    const float occupancyNudge = juce::jlimit (-maxOccupancyNudgeDeg, maxOccupancyNudgeDeg,
+                                                -occupancyImbalance * occupancyNudgeDegPerUnit);
+    const float adjustedRotationDeg = suggestion->rotationDeg + occupancyNudge;
+
     auto apply = [] (juce::AudioParameterFloat* p, float value)
     {
         p->setValueNotifyingHost (p->convertTo0to1 (value));
     };
 
-    apply (rotationParam, juce::jlimit (-180.0f, 180.0f, suggestion->rotationDeg));
+    apply (rotationParam, juce::jlimit (-180.0f, 180.0f, adjustedRotationDeg));
     apply (widthParam,    juce::jlimit (0.0f, 200.0f, suggestion->widthPercent));
 }
 

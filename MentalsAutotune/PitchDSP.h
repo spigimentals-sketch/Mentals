@@ -36,15 +36,28 @@ namespace PitchDSP
                               float& outFreqHz, float& outConfidence) noexcept
     {
         const int minLag = juce::jmax (1, (int) (sampleRate / maxFreqHz));
-        const int maxLag = juce::jmin (windowSize - 1, (int) (sampleRate / minFreqHz));
+
+        // A lag needs a reasonable number of overlapping samples for its
+        // correlation score to mean anything. Without this floor, a lag
+        // forced right up against the window boundary (whenever the window
+        // is too short to comfortably fit the requested minFreqHz -- Low-
+        // Latency Mode's short window is the common case) leaves only a
+        // handful of overlapping samples, or even one, whose correlation
+        // trivially reaches +-1.0 purely by chance -- a spuriously "perfect"
+        // score that looks like a rock-solid detection but is really just
+        // noise. Capping lag at half the window guarantees at least half
+        // the window always participates, which does mean the true
+        // achievable frequency floor gets silently raised whenever the
+        // window is too short to support the requested minFreqHz -- but
+        // that's honest: a short window fundamentally cannot resolve a very
+        // low pitch, no matter what range was asked for.
+        const int overlapFloorLag = windowSize / 2;
+        const int maxLag = juce::jmin (overlapFloorLag, (int) (sampleRate / minFreqHz));
 
         if (maxLag <= minLag)
             return false;
 
-        int bestLag = -1;
-        float bestScore = 0.0f;
-
-        for (int lag = minLag; lag <= maxLag; ++lag)
+        auto scoreAt = [&] (int lag)
         {
             double crossSum = 0.0, energyA = 0.0, energyB = 0.0;
             const int overlap = windowSize - lag;
@@ -59,12 +72,54 @@ namespace PitchDSP
             }
 
             const double denom = std::sqrt (energyA * energyB);
-            const float score = denom > 1.0e-9 ? (float) (crossSum / denom) : 0.0f;
+            return denom > 1.0e-9 ? (float) (crossSum / denom) : 0.0f;
+        };
+
+        // Score storage capped to a generous fixed size so this stays
+        // allocation-free on the audio thread; windowSize (a few thousand
+        // samples at most, in practice) never approaches this span.
+        constexpr int maxLagSpan = 4096;
+        const int lagCount = juce::jmin (maxLag - minLag + 1, maxLagSpan);
+        std::array<float, maxLagSpan> scores {};
+        for (int i = 0; i < lagCount; ++i)
+            scores[(size_t) i] = scoreAt (minLag + i);
+
+        // Octave-error mitigation: picking the single highest-scoring lag
+        // across the whole range regularly locks onto a subharmonic (an
+        // octave or more BELOW the true pitch), because a strong, harmonic-
+        // rich singing voice makes integer multiples of the true period
+        // score nearly as well as -- and sometimes marginally better than --
+        // the true period itself. That's the single biggest cause of a
+        // pitch corrector suddenly "helping" a note an octave away from
+        // what was actually sung, which reads as broken/weird rather than
+        // just imprecise. Scanning from the shortest lag (highest
+        // frequency) upward and taking the FIRST strong local peak, instead
+        // of the global maximum, prefers the true fundamental over its
+        // subharmonics -- the same principle behind YIN's absolute-
+        // threshold search. Falls back to the previous "pick whatever
+        // scored highest" behaviour if nothing clears the strong-peak bar,
+        // so a quiet/ambiguous frame isn't handled any worse than before.
+        constexpr float strongPeakThreshold = 0.6f;
+        int bestLag = -1;
+        float bestScore = 0.0f;
+
+        for (int i = 0; i < lagCount; ++i)
+        {
+            const float score = scores[(size_t) i];
+            const bool isLocalPeak = (i == 0 || score >= scores[(size_t) (i - 1)])
+                                   && (i == lagCount - 1 || score >= scores[(size_t) (i + 1)]);
+
+            if (isLocalPeak && score >= strongPeakThreshold)
+            {
+                bestLag = minLag + i;
+                bestScore = score;
+                break;
+            }
 
             if (score > bestScore)
             {
                 bestScore = score;
-                bestLag = lag;
+                bestLag = minLag + i;
             }
         }
 
@@ -72,26 +127,11 @@ namespace PitchDSP
             return false;
 
         // Parabolic interpolation around the best lag using its neighbours'
-        // scores, for sub-sample accuracy (recomputing just those two).
+        // scores, for sub-sample accuracy (reusing the shared scoreAt()
+        // rather than recomputing the whole scan).
         float interpolatedLag = (float) bestLag;
         if (bestLag > minLag && bestLag < maxLag)
         {
-            auto scoreAt = [&] (int lag)
-            {
-                double crossSum = 0.0, energyA = 0.0, energyB = 0.0;
-                const int overlap = windowSize - lag;
-                for (int i = 0; i < overlap; ++i)
-                {
-                    const float a = windowedSamples[i];
-                    const float b = windowedSamples[i + lag];
-                    crossSum += (double) a * (double) b;
-                    energyA  += (double) a * (double) a;
-                    energyB  += (double) b * (double) b;
-                }
-                const double denom = std::sqrt (energyA * energyB);
-                return denom > 1.0e-9 ? (float) (crossSum / denom) : 0.0f;
-            };
-
             const float sPrev = scoreAt (bestLag - 1);
             const float sNext = scoreAt (bestLag + 1);
             const float denom = sPrev - 2.0f * bestScore + sNext;
@@ -107,6 +147,54 @@ namespace PitchDSP
     inline float midiNoteToFrequencyHz (int midiNote) noexcept
     {
         return 440.0f * std::pow (2.0f, (float) (midiNote - 69) / 12.0f);
+    }
+
+    // Scientific pitch notation (e.g. "A4", "C#5") for a detected/target
+    // frequency -- what the editor's note display shows for "the key the
+    // vocal is hitting". Returns an empty string for a non-positive/silent
+    // frequency rather than a nonsense note name.
+    inline juce::String frequencyToNoteName (float freqHz) noexcept
+    {
+        if (freqHz <= 0.0f)
+            return {};
+
+        static const char* names[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+
+        const float midiFloat = 69.0f + 12.0f * std::log2 (freqHz / 440.0f);
+        const int midiNote = (int) std::floor (midiFloat + 0.5f);
+        const int noteIndex = ((midiNote % 12) + 12) % 12;
+        const int octave = midiNote / 12 - 1; // MIDI note 60 == C4, note 0 == C-1
+
+        return juce::String (names[noteIndex]) + juce::String (octave);
+    }
+
+    //==========================================================================
+    // Voice-type detection ranges: narrows the pitch detector's search band
+    // to a real singer's actual range instead of always scanning the full
+    // bass-to-soprano span. Two benefits, not one -- a tighter band also
+    // makes octave errors less likely in the first place, since fewer
+    // candidate lags (fewer harmonics/subharmonics) fall inside it at all.
+    // "Auto (Wide Range)" keeps today's original full-range behaviour for
+    // anyone who'd rather not pick a voice type.
+    //==========================================================================
+    struct VoiceTypeRange
+    {
+        const char* name;
+        float minFreqHz, maxFreqHz;
+    };
+
+    inline const std::vector<VoiceTypeRange>& getVoiceTypeRanges()
+    {
+        static const std::vector<VoiceTypeRange> ranges
+        {
+            { "Auto (Wide Range)", 70.0f,  1200.0f },
+            { "Bass",              65.0f,  330.0f  },
+            { "Baritone",          80.0f,  400.0f  },
+            { "Tenor",             95.0f,  520.0f  },
+            { "Alto",              140.0f, 700.0f  },
+            { "Soprano",           200.0f, 1100.0f },
+        };
+        return ranges;
     }
 
     //==========================================================================

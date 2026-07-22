@@ -1,6 +1,5 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
-#include "BinaryData.h"
 #include "PitchDSP.h"
 #include <algorithm>
 
@@ -106,6 +105,25 @@ void PitchHistoryComponent::paint (juce::Graphics& g)
         g.setFont (12.0f);
         g.drawText ("Listening...", getLocalBounds(), juce::Justification::centred);
     }
+
+    // Note-name overlay -- "the keys a vocal is hitting" at a glance,
+    // rather than having to read a position off the scrolling graph.
+    auto noteArea = getLocalBounds().reduced (10, 6).removeFromTop (56).removeFromRight (140);
+
+    const juce::String detectedNote = processor.isVoiced()
+        ? PitchDSP::frequencyToNoteName (processor.getDetectedFrequencyHz())
+        : juce::String();
+    const juce::String targetNote = processor.isVoiced()
+        ? PitchDSP::frequencyToNoteName (processor.getTargetFrequencyHz())
+        : juce::String();
+
+    g.setColour (MentalsUI::Colours::goldenYellow);
+    g.setFont (juce::Font (juce::FontOptions (28.0f, juce::Font::bold)));
+    g.drawText (detectedNote.isNotEmpty() ? detectedNote : "--", noteArea.removeFromTop (34), juce::Justification::centredRight);
+
+    g.setColour (MentalsUI::Colours::electricBlue);
+    g.setFont (juce::Font (juce::FontOptions (15.0f)));
+    g.drawText (targetNote.isNotEmpty() ? "Target " + targetNote : "Target --", noteArea, juce::Justification::centredRight);
 }
 
 //==============================================================================
@@ -113,12 +131,10 @@ void PitchHistoryComponent::paint (juce::Graphics& g)
 //==============================================================================
 MentalsAutotuneAudioProcessorEditor::MentalsAutotuneAudioProcessorEditor (MentalsAutotuneAudioProcessor& p)
     : AudioProcessorEditor (&p), processor (p), pitchHistory (p),
-      outputMeter ([&p] { return p.getOutputPeakDb(); }, [&p] { return p.isOutputClipping(); })
+      outputMeter ([&p] { return p.getOutputPeakDb(); })
 {
-    setLookAndFeel (&MentalsUI::MentalsLookAndFeel::getSharedInstance());
+    setLookAndFeel (&hardwareLookAndFeel);
 
-    logoImage.setImage (juce::ImageFileFormat::loadFrom (BinaryData::mentals_logo_png, (size_t) BinaryData::mentals_logo_pngSize));
-    logoImage.setImagePlacement (juce::RectanglePlacement::centred);
     addAndMakeVisible (logoImage);
 
     productNameLabel.setText ("Autotune", juce::dontSendNotification);
@@ -184,6 +200,22 @@ MentalsAutotuneAudioProcessorEditor::MentalsAutotuneAudioProcessorEditor (Mental
     scaleSelector.setColour (juce::ComboBox::outlineColourId,    MentalsUI::Colours::slateGray);
     scaleSelector.setColour (juce::ComboBox::arrowColourId,      MentalsUI::Colours::white);
     addAndMakeVisible (scaleSelector);
+
+    voiceTypeLabel.setText ("Voice", juce::dontSendNotification);
+    voiceTypeLabel.setColour (juce::Label::textColourId, MentalsUI::Colours::white);
+    addAndMakeVisible (voiceTypeLabel);
+
+    {
+        juce::StringArray voiceTypeNames;
+        for (auto& range : PitchDSP::getVoiceTypeRanges())
+            voiceTypeNames.add (range.name);
+        voiceTypeSelector.addItemList (voiceTypeNames, 1);
+    }
+    voiceTypeSelector.setColour (juce::ComboBox::backgroundColourId, MentalsUI::Colours::slateGrayDark);
+    voiceTypeSelector.setColour (juce::ComboBox::textColourId,       MentalsUI::Colours::white);
+    voiceTypeSelector.setColour (juce::ComboBox::outlineColourId,    MentalsUI::Colours::slateGray);
+    voiceTypeSelector.setColour (juce::ComboBox::arrowColourId,      MentalsUI::Colours::white);
+    addAndMakeVisible (voiceTypeSelector);
 
     retuneSpeedSlider.addToParent ("Retune Speed", *this);
     amountSlider.addToParent      ("Amount",       *this);
@@ -257,6 +289,8 @@ MentalsAutotuneAudioProcessorEditor::MentalsAutotuneAudioProcessorEditor (Mental
         processor.apvts, "key", keySelector);
     scaleAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
         processor.apvts, "scale", scaleSelector);
+    voiceTypeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+        processor.apvts, "voiceType", voiceTypeSelector);
     retuneSpeedAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processor.apvts, "retuneSpeed", retuneSpeedSlider.slider);
     amountAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
@@ -512,16 +546,34 @@ void MentalsAutotuneAudioProcessorEditor::showHarmonyPanel()
 
 void MentalsAutotuneAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (MentalsUI::Colours::charcoalBlack);
+    g.fillAll (juce::Colour (0xff0c0c0d));
 
     auto topBarArea = getLocalBounds().removeFromTop (40);
-    g.setColour (MentalsUI::Colours::slateGrayDark);
-    g.fillRect (topBarArea);
+    MentalsUI::HardwareLookAndFeel::drawMetalPanel (g, topBarArea.toFloat());
+
+    if (! lastPanelBounds.isEmpty())
+    {
+        auto panelBoundsF = lastPanelBounds.toFloat();
+        MentalsUI::HardwareLookAndFeel::drawMetalPanel (g, panelBoundsF);
+
+        constexpr float inset = 10.0f;
+        MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getX() + inset, panelBoundsF.getY() + inset });
+        MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getRight() - inset, panelBoundsF.getY() + inset });
+        MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getX() + inset, panelBoundsF.getBottom() - inset });
+        MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getRight() - inset, panelBoundsF.getBottom() - inset });
+    }
+
+    constexpr float earWidth = 22.0f;
+    auto fullBounds = getLocalBounds().toFloat();
+    MentalsUI::HardwareLookAndFeel::drawRackEar (g, fullBounds.removeFromLeft (earWidth).reduced (2.0f));
+    MentalsUI::HardwareLookAndFeel::drawRackEar (g, fullBounds.removeFromRight (earWidth).reduced (2.0f));
 }
 
 void MentalsAutotuneAudioProcessorEditor::resized()
 {
     auto area = getLocalBounds();
+    area.removeFromLeft (24);
+    area.removeFromRight (24);
 
     constexpr int topBarHeight   = 40;
     constexpr int splitterHeight = 8;
@@ -551,6 +603,8 @@ void MentalsAutotuneAudioProcessorEditor::resized()
     auto splitterArea = area.removeFromBottom (splitterHeight);
     auto graphArea    = area;
 
+    lastPanelBounds = panelArea;
+
     pitchHistory.setBounds (graphArea.reduced (8));
     splitter.setBounds (splitterArea);
 
@@ -562,6 +616,9 @@ void MentalsAutotuneAudioProcessorEditor::resized()
     keyRow.removeFromLeft (12);
     scaleLabel.setBounds (keyRow.removeFromLeft (44));
     scaleSelector.setBounds (keyRow.removeFromLeft (190)); // wide enough for "22-Shruti (Just Intonation)"
+    keyRow.removeFromLeft (12);
+    voiceTypeLabel.setBounds (keyRow.removeFromLeft (44));
+    voiceTypeSelector.setBounds (keyRow.removeFromLeft (150));
     p.removeFromTop (6);
 
     auto knobArea = p;

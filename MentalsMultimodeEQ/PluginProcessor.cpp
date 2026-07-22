@@ -19,6 +19,173 @@ namespace
     {
         return shape == FilterShape::HighPass || shape == FilterShape::LowPass;
     }
+
+    //==========================================================================
+    // EqAssistModel feature extraction. Must match extract_features.py's
+    // macro_energy_db()/cut_features() exactly (same bin ranges, same
+    // power-domain averaging) -- see Models/README.md.
+    //==========================================================================
+    float macroEnergyDb (const std::vector<float>& spectrumDb, double sampleRate, int fftSize, float loHz, float hiHz)
+    {
+        const double binHz = sampleRate / (double) fftSize;
+        const int numBins = (int) spectrumDb.size();
+        const int loBin = juce::jmax (0, (int) (loHz / binHz));
+        const int hiBin = juce::jmin (numBins, (int) (hiHz / binHz) + 1);
+        if (hiBin <= loBin)
+            return -100.0f;
+
+        double sumLinear = 0.0;
+        for (int b = loBin; b < hiBin; ++b)
+            sumLinear += std::pow (10.0, (double) spectrumDb[(size_t) b] / 10.0);
+
+        return (float) (10.0 * std::log10 (sumLinear / (double) (hiBin - loBin) + 1.0e-12));
+    }
+
+    std::array<float, 8> eqAssistCutFeatures (const std::vector<float>& spectrumDb, double sampleRate, int fftSize)
+    {
+        const float overall = macroEnergyDb (spectrumDb, sampleRate, fftSize, (float) (sampleRate / fftSize), (float) (sampleRate * 0.5));
+        const float subBass = macroEnergyDb (spectrumDb, sampleRate, fftSize, 10.0f, 30.0f) - overall;
+        const float bass    = macroEnergyDb (spectrumDb, sampleRate, fftSize, 30.0f, 60.0f) - overall;
+        const float lowMid  = macroEnergyDb (spectrumDb, sampleRate, fftSize, 150.0f, 400.0f) - overall;
+        const float high    = macroEnergyDb (spectrumDb, sampleRate, fftSize, 12000.0f, 16000.0f) - overall;
+        const float air     = macroEnergyDb (spectrumDb, sampleRate, fftSize, 16000.0f, 20000.0f) - overall;
+        const float lowSlope  = macroEnergyDb (spectrumDb, sampleRate, fftSize, 60.0f, 100.0f)
+                               - macroEnergyDb (spectrumDb, sampleRate, fftSize, 10.0f, 30.0f);
+        const float highSlope = macroEnergyDb (spectrumDb, sampleRate, fftSize, 18000.0f, 20000.0f)
+                               - macroEnergyDb (spectrumDb, sampleRate, fftSize, 12000.0f, 14000.0f);
+        return { subBass, bass, lowMid, high, air, overall, lowSlope, highSlope };
+    }
+
+    // The 7 macro-bands used by both the spectral-balance heuristic above
+    // and (here) the instrument-category classifier/reference curves --
+    // must match extract_features_v2.py's MACRO_BANDS exactly.
+    constexpr std::array<std::pair<float, float>, 7> categoryMacroBands {{
+        { 20.0f, 80.0f }, { 80.0f, 250.0f }, { 250.0f, 800.0f }, { 800.0f, 2500.0f },
+        { 2500.0f, 6000.0f }, { 6000.0f, 12000.0f }, { 12000.0f, 20000.0f }
+    }};
+
+    // Reference curves: each category's average real-audio macro-band
+    // shape (relative to its own overall level), computed once from
+    // MUSDB18HQ (see Models/README.md) -- indices match
+    // extract_features_v2.py's CATEGORY_NAMES. Instrument-aware target
+    // curves use these instead of flattening every track towards its own
+    // average, which doesn't distinguish a kick drum's naturally bass-
+    // heavy shape from a hi-hat's naturally treble-heavy one.
+    constexpr const char* categoryNames[] = { "Vocals", "Drums", "Bass", "Other", "Mixture" };
+    constexpr std::array<std::array<float, 7>, 5> categoryReferenceCurves {{
+        { -10.394078f,   4.222233f,  12.252428f,   2.100836f,  -5.785967f, -14.819640f, -23.227668f }, // Vocals
+        {  16.808410f,  16.871366f,   4.047982f,  -5.258839f,  -5.426491f, -10.048739f, -18.773783f }, // Drums
+        {  16.943207f,  19.836208f,  -4.045785f, -25.294087f, -30.295610f, -31.779457f, -31.978904f }, // Bass
+        {  -5.832837f,  13.990394f,  12.007932f,   0.731897f, -10.342810f, -26.614864f, -30.820102f }, // Other
+        {  12.673898f,  17.695000f,   9.337998f,  -1.730836f, -10.121452f, -20.106730f, -29.008213f }, // Mixture
+    }};
+
+    // 7 relative macro-band levels + the window's overall level -- must
+    // match extract_features_v2.py's macro_band_profile() exactly.
+    std::array<float, 8> eqAssistCategoryFeatures (const std::vector<float>& spectrumDb, double sampleRate, int fftSize)
+    {
+        const float overall = macroEnergyDb (spectrumDb, sampleRate, fftSize, (float) (sampleRate / fftSize), (float) (sampleRate * 0.5));
+        std::array<float, 8> features {};
+        for (size_t i = 0; i < categoryMacroBands.size(); ++i)
+            features[i] = macroEnergyDb (spectrumDb, sampleRate, fftSize, categoryMacroBands[i].first, categoryMacroBands[i].second) - overall;
+        features[7] = overall;
+        return features;
+    }
+
+    // Absolute-dB profile across EqMixRegistry's 24 log-spaced bands, for
+    // publish() -- band edges sit at the geometric midpoint between
+    // adjacent centre frequencies (0/Nyquist at the outer edges).
+    std::array<float, EqMixRegistry::numBands> computeMixRegistryProfile (const std::vector<float>& spectrumDb, double sampleRate, int fftSize)
+    {
+        std::array<float, EqMixRegistry::numBands> profile {};
+        for (int i = 0; i < EqMixRegistry::numBands; ++i)
+        {
+            const float centre = EqMixRegistry::bandCentreHz (i);
+            const float loEdge = (i == 0) ? 0.0f : std::sqrt (EqMixRegistry::bandCentreHz (i - 1) * centre);
+            const float hiEdge = (i == EqMixRegistry::numBands - 1) ? (float) (sampleRate * 0.5)
+                                                                     : std::sqrt (centre * EqMixRegistry::bandCentreHz (i + 1));
+            profile[(size_t) i] = macroEnergyDb (spectrumDb, sampleRate, fftSize, loEdge, hiEdge);
+        }
+        return profile;
+    }
+
+    //==========================================================================
+    // Harmonicity: this plugin's own independent copy of the octave-error-
+    // resistant autocorrelation pitch detector (same algorithm as
+    // MentalsAutotune/PitchDSP.h's detectPitch() -- kept as a separate copy
+    // rather than a shared header, consistent with how each plugin already
+    // owns its DSP). Only used by AI Assist's harmonicity feature, never
+    // the main EQ signal path.
+    //==========================================================================
+    bool detectPitchForHarmonicity (const float* windowedSamples, int windowSize, double sampleRate,
+                                     float minFreqHz, float maxFreqHz, float& outFreqHz, float& outConfidence) noexcept
+    {
+        const int minLag = juce::jmax (1, (int) (sampleRate / maxFreqHz));
+        const int overlapFloorLag = windowSize / 2;
+        const int maxLag = juce::jmin (overlapFloorLag, (int) (sampleRate / minFreqHz));
+        if (maxLag <= minLag)
+            return false;
+
+        auto scoreAt = [&] (int lag)
+        {
+            double crossSum = 0.0, energyA = 0.0, energyB = 0.0;
+            const int overlap = windowSize - lag;
+            for (int i = 0; i < overlap; ++i)
+            {
+                const float a = windowedSamples[i];
+                const float b = windowedSamples[i + lag];
+                crossSum += (double) a * (double) b;
+                energyA  += (double) a * (double) a;
+                energyB  += (double) b * (double) b;
+            }
+            const double denom = std::sqrt (energyA * energyB);
+            return denom > 1.0e-9 ? (float) (crossSum / denom) : 0.0f;
+        };
+
+        constexpr int maxLagSpan = 4096;
+        const int lagCount = juce::jmin (maxLag - minLag + 1, maxLagSpan);
+        std::array<float, maxLagSpan> scores {};
+        for (int i = 0; i < lagCount; ++i)
+            scores[(size_t) i] = scoreAt (minLag + i);
+
+        constexpr float strongPeakThreshold = 0.6f;
+        int bestLag = -1;
+        float bestScore = 0.0f;
+        for (int i = 0; i < lagCount; ++i)
+        {
+            const float score = scores[(size_t) i];
+            const bool isLocalPeak = (i == 0 || score >= scores[(size_t) (i - 1)])
+                                   && (i == lagCount - 1 || score >= scores[(size_t) (i + 1)]);
+            if (isLocalPeak && score >= strongPeakThreshold)
+            {
+                bestLag = minLag + i;
+                bestScore = score;
+                break;
+            }
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestLag = minLag + i;
+            }
+        }
+
+        if (bestLag < 0 || bestScore < 0.05f)
+            return false;
+
+        float interpolatedLag = (float) bestLag;
+        if (bestLag > minLag && bestLag < maxLag)
+        {
+            const float sPrev = scoreAt (bestLag - 1);
+            const float sNext = scoreAt (bestLag + 1);
+            const float denom = sPrev - 2.0f * bestScore + sNext;
+            if (std::abs (denom) > 1.0e-9f)
+                interpolatedLag += 0.5f * (sPrev - sNext) / denom;
+        }
+
+        outFreqHz = (float) (sampleRate / (double) interpolatedLag);
+        outConfidence = bestScore;
+        return true;
+    }
 }
 
 //==============================================================================
@@ -207,7 +374,13 @@ void MultiModeEQAudioProcessor::prepareToPlay (double sampleRate, int samplesPer
         aiAssistFifoIndex = 0;
         aiAssistCapturing = false;
         aiAssistHasCapture = false;
+        aiAssistPitchSemitones.clear();
+        aiAssistPitchFreqHz = 0.0f;
+        aiAssistPitchStability = 0.0f;
     }
+
+    mixRegistryPublishScratch.assign ((size_t) spectrumNumBins, -100.0f);
+    samplesSinceLastMixRegistryPublish = 0;
 
     // ---- Split-band visualiser filters (unchanged from before) ---------------
     using Coeffs = juce::dsp::IIR::Coefficients<float>;
@@ -300,6 +473,21 @@ void MultiModeEQAudioProcessor::processBand (EQBand& band, juce::AudioBuffer<flo
 
     BiquadCoefficients blockStartCoefficients = band.previousCoefficients;
 
+    // Extra-fast (5ms) smoothing applied to the actual computed
+    // coefficients, on top of the slower (20ms) SmoothedValue ramps on
+    // freq/gain/Q/threshold/ratio above: those glide the numeric
+    // PARAMETERS smoothly, but changing Filter Shape or Mode (Dynamic
+    // forces Bell) swaps which coefficient FORMULA is used altogether --
+    // an instantaneous jump to a very different coefficient set,
+    // independent of any parameter smoothing, which can click/pop
+    // (especially for a resonant High Pass/Low Pass) because the filter's
+    // existing internal state suddenly gets driven by coefficients it
+    // wasn't built up under. Blending the coefficients themselves over a
+    // short, effectively-inaudible time constant catches that case without
+    // perceptibly slowing down ordinary parameter moves.
+    constexpr float coefficientSmoothingMs = 5.0f;
+    const float coefficientSmoothingCoeff = std::exp (-1.0f / (0.001f * coefficientSmoothingMs * (float) currentSampleRate));
+
     for (int n = 0; n < numSamples; ++n)
     {
         // These smoothers must each advance exactly once per sample regardless
@@ -370,7 +558,7 @@ void MultiModeEQAudioProcessor::processBand (EQBand& band, juce::AudioBuffer<flo
             default:                    targetCoefficients = BiquadCoefficients::makePeaking   (currentSampleRate, freq, q, gain); break;
         }
 
-        const BiquadCoefficients activeCoefficients = BiquadCoefficients::lerp (blockStartCoefficients, targetCoefficients, 1.0f);
+        const BiquadCoefficients activeCoefficients = BiquadCoefficients::lerp (blockStartCoefficients, targetCoefficients, 1.0f - coefficientSmoothingCoeff);
         blockStartCoefficients = activeCoefficients;
 
         switch (target)
@@ -786,12 +974,22 @@ void MultiModeEQAudioProcessor::updateAiAssistCapture (const juce::AudioBuffer<f
                 aiAssistFftData[(size_t) i] = aiAssistFifo[(size_t) i] * window;
             }
 
+            // Pitch detection reads the Hann-windowed time-domain frame,
+            // so it must run before the FFT below overwrites aiAssistFftData
+            // in place with frequency-domain magnitudes.
+            float pitchFreqHz = 0.0f, pitchConfidence = 0.0f;
+            const bool pitchFound = detectPitchForHarmonicity (aiAssistFftData.data(), spectrumFftSize, currentSampleRate,
+                                                                60.0f, 1500.0f, pitchFreqHz, pitchConfidence);
+
             aiAssistFft.performFrequencyOnlyForwardTransform (aiAssistFftData.data(), true);
 
             const juce::SpinLock::ScopedLockType lock (aiAssistLock);
 
             if (! aiAssistCapturing) // cancelAiAssistAnalysis() may have fired while the FFT above ran
                 return;
+
+            if (pitchFound && pitchConfidence >= 0.5f)
+                aiAssistPitchSemitones.push_back (12.0f * std::log2 (pitchFreqHz / 440.0f));
 
             for (int bin = 0; bin < spectrumNumBins; ++bin)
             {
@@ -803,6 +1001,28 @@ void MultiModeEQAudioProcessor::updateAiAssistCapture (const juce::AudioBuffer<f
             {
                 for (auto& v : aiAssistCapturedSpectrumDb)
                     v /= (float) aiAssistCaptureBlocks;
+
+                // Mirrors extract_features_v2.py's analyse_pitch_stability():
+                // need a healthy fraction of confidently-pitched frames to
+                // trust a representative pitch at all.
+                if ((int) aiAssistPitchSemitones.size() >= juce::jmax (4, (aiAssistCaptureBlocks * 3) / 10))
+                {
+                    float mean = 0.0f;
+                    for (float s : aiAssistPitchSemitones) mean += s;
+                    mean /= (float) aiAssistPitchSemitones.size();
+
+                    float variance = 0.0f;
+                    for (float s : aiAssistPitchSemitones) variance += (s - mean) * (s - mean);
+                    variance /= (float) aiAssistPitchSemitones.size();
+
+                    aiAssistPitchStability = juce::jlimit (0.0f, 1.0f, 1.0f - std::sqrt (variance) / 1.5f);
+                    aiAssistPitchFreqHz = 440.0f * std::pow (2.0f, mean / 12.0f);
+                }
+                else
+                {
+                    aiAssistPitchStability = 0.0f;
+                    aiAssistPitchFreqHz = 0.0f;
+                }
 
                 aiAssistCapturing = false;
                 aiAssistHasCapture = true;
@@ -819,6 +1039,9 @@ void MultiModeEQAudioProcessor::beginAiAssistAnalysis()
     aiAssistCaptureBlocks = 0;
     aiAssistHasCapture = false;
     aiAssistCapturing = true;
+    aiAssistPitchSemitones.clear();
+    aiAssistPitchFreqHz = 0.0f;
+    aiAssistPitchStability = 0.0f;
 }
 
 void MultiModeEQAudioProcessor::cancelAiAssistAnalysis()
@@ -836,12 +1059,22 @@ bool MultiModeEQAudioProcessor::isAiAssistCapturing() const noexcept
 int MultiModeEQAudioProcessor::applyAiAssistSuggestions()
 {
     std::vector<float> capturedDb;
+    float pitchFreqHz = 0.0f, pitchStability = 0.0f;
     {
         const juce::SpinLock::ScopedLockType lock (aiAssistLock);
         if (! aiAssistHasCapture)
             return 0;
         capturedDb = aiAssistCapturedSpectrumDb;
+        pitchFreqHz = aiAssistPitchFreqHz;
+        pitchStability = aiAssistPitchStability;
     }
+
+    // Masking-aware AI Assist: a snapshot of what OTHER currently-active
+    // Multimode EQ instances are occupying right now (see EqMixRegistry.h).
+    // othersCount == 0 just means no other instance is currently detected
+    // (or none exists) -- levelAtFrequency() handles that by reporting
+    // -100dB, giving a harmless ~0 masking-pressure feature below.
+    const auto maskingAggregate = eqMixRegistry.computeAggregate();
 
     // ---- Bands available to claim: still at their untouched mid-band
     // default state (Parametric, Bell, ~0dB), regardless of their Enabled
@@ -916,16 +1149,32 @@ int MultiModeEQAudioProcessor::applyAiAssistSuggestions()
 
     const float overallAvgDb = (float) (overallSumDb / overallCount);
 
+    // ---- Instrument-aware target: classify the likely source category
+    // (see Models/README.md) and use its reference curve as the target
+    // shape below, instead of just flattening every track toward its own
+    // average -- a kick drum and a hi-hat have very different natural
+    // spectra, so "deviation from this track's own average" was a crude
+    // one-size-fits-all measure. Falls back to the exact previous
+    // behaviour (referenceCurve == nullptr -> targetRelative 0.0f below)
+    // if the model isn't available on this machine.
+    const auto categoryFeatures = eqAssistCategoryFeatures (capturedDb, currentSampleRate, spectrumFftSize);
+    const auto categoryIndex = eqAssistModel.predictCategory (categoryFeatures);
+    const std::array<float, 7>* referenceCurve =
+        (categoryIndex.has_value() && *categoryIndex >= 0 && *categoryIndex < (int) categoryReferenceCurves.size())
+            ? &categoryReferenceCurves[(size_t) *categoryIndex] : nullptr;
+
     for (size_t m = 0; m < macroBands.size(); ++m)
     {
         if (macroCount[m] == 0)
             continue;
 
         const float macroAvgDb = (float) (macroSumDb[m] / macroCount[m]);
-        const float deviation  = macroAvgDb - overallAvgDb;
+        const float ownRelativeDb = macroAvgDb - overallAvgDb;
+        const float targetRelativeDb = referenceCurve != nullptr ? (*referenceCurve)[m] : 0.0f;
+        const float deviation = ownRelativeDb - targetRelativeDb;
 
         if (std::abs (deviation) < 3.0f)
-            continue; // already balanced here
+            continue; // already balanced here (relative to the instrument-aware target, if any)
 
         const float correctionDb = (deviation > 0.0f ? -1.0f : 1.0f) * juce::jlimit (2.0f, 6.0f, std::abs (deviation) * 0.6f);
         const float centreFreq   = macroBands[m].isEdge
@@ -940,7 +1189,7 @@ int MultiModeEQAudioProcessor::applyAiAssistSuggestions()
     // own local (roughly +/-1/3-octave) baseline. Kept candidates within
     // ~12% of each other in frequency are merged so one spectral "hump"
     // doesn't produce several overlapping suggestions.
-    struct ResonancePeak { double freqHz; float prominence; };
+    struct ResonancePeak { double freqHz; float prominence; int bin, loBin, hiBin; float db, baseline; };
     std::vector<ResonancePeak> resonances;
 
     for (int bin = 3; bin < spectrumNumBins - 3; ++bin)
@@ -977,7 +1226,7 @@ int MultiModeEQAudioProcessor::applyAiAssistSuggestions()
         const float prominence = db - baseline;
 
         if (prominence > 5.0f)
-            resonances.push_back ({ freq, prominence });
+            resonances.push_back ({ freq, prominence, bin, loBin, hiBin, db, baseline });
     }
 
     std::sort (resonances.begin(), resonances.end(),
@@ -1004,15 +1253,89 @@ int MultiModeEQAudioProcessor::applyAiAssistSuggestions()
         }
     }
 
+    // Full-spectrum mean (every bin, unrestricted) -- loudness context for
+    // EqAssistModel::predictResonance(), distinct from overallAvgDb above
+    // (which only covers 20-20000Hz and feeds the older spectral-balance
+    // heuristic). Must match extract_features.py's resonance feature #5
+    // (plain np.mean(spectrum_db) over the whole array) exactly.
+    const float fullSpectrumMeanDb = (float) (std::accumulate (capturedDb.begin(), capturedDb.end(), 0.0) / (double) capturedDb.size());
+
     for (auto& r : keptResonances)
     {
-        // Dynamic Bell: static gain stays at 0dB, and the cut only emerges
-        // when the envelope crosses thresholdDb -- the exact same mechanism
-        // any manually-configured Dynamic band uses (see EQBand's envelope
-        // detector in processBand()), just chosen automatically here rather
-        // than by hand.
-        const float thresholdDb = juce::jlimit (-50.0f, -6.0f, overallAvgDb - 8.0f);
-        suggestions.push_back ({ (float) r.freqHz, 0.0f, 5.0f, true, FilterShape::Bell, thresholdDb, 3.0f, r.prominence });
+        // Tilt: upper-context mean minus lower-context mean within the same
+        // +-~1/3-octave window used for baseline above -- must match
+        // extract_features.py's resonance_features_and_labels() exactly.
+        double loSum = 0.0; int loCount = 0;
+        for (int b = r.loBin; b < juce::jmax (r.bin - 2, r.loBin + 1); ++b) { loSum += capturedDb[(size_t) b]; ++loCount; }
+        double hiSum = 0.0; int hiCount = 0;
+        for (int b = juce::jmin (r.bin + 3, r.hiBin); b <= r.hiBin; ++b) { hiSum += capturedDb[(size_t) b]; ++hiCount; }
+        const float loCtx = loCount > 0 ? (float) (loSum / loCount) : r.baseline;
+        const float hiCtx = hiCount > 0 ? (float) (hiSum / hiCount) : r.baseline;
+        const float tilt = hiCtx - loCtx;
+
+        // Masking pressure: how much OTHER currently-active instances
+        // occupy this exact frequency right now, relative to this peak's
+        // own level -- positive when something else already dominates
+        // here, in which case the trained model learned to cut harder
+        // (see Models/README.md). 0 (from levelAtFrequency's -100dB
+        // default) when no other instance is currently detected.
+        const float othersLevelDb = EqMixRegistry::levelAtFrequency (maskingAggregate, (float) r.freqHz);
+        const float maskingPressureDb = juce::jlimit (-24.0f, 24.0f, othersLevelDb - r.db);
+
+        // Harmonicity: how closely this peak aligns with a harmonic of a
+        // stable pitch actually detected in this track's own audio during
+        // the capture -- high harmonicity damps the suggested cut, since a
+        // prominent, harmonically-aligned peak is more likely the note
+        // being played than a problem resonance (see Models/README.md).
+        // 0 if no stable pitch was found in the capture at all.
+        float harmonicity = 0.0f;
+        if (pitchFreqHz > 0.0f && pitchStability > 0.0f)
+        {
+            const int harmonicNumber = juce::jmax (1, (int) std::round (r.freqHz / pitchFreqHz));
+            const float centsOff = std::abs (1200.0f * std::log2 ((float) r.freqHz / (pitchFreqHz * (float) harmonicNumber)));
+            harmonicity = pitchStability * juce::jmax (0.0f, 1.0f - centsOff / 50.0f);
+        }
+
+        const std::array<float, 7> features { std::log10 ((float) r.freqHz), r.prominence, r.db, tilt, fullSpectrumMeanDb,
+                                               maskingPressureDb, harmonicity };
+        const auto trained = eqAssistModel.predictResonance (features);
+
+        if (trained.has_value())
+        {
+            // Static Bell cut at the model's learned (gainDb, Q) -- a
+            // genuinely trained correction (see Models/README.md), not the
+            // fixed Q=5/dynamic-threshold guess this used to hardcode.
+            suggestions.push_back ({ (float) r.freqHz, trained->gainDb, trained->q,
+                                      false, FilterShape::Bell, -20.0f, 2.0f, r.prominence });
+        }
+        else
+        {
+            // Model unavailable on this machine -- fall back to the
+            // original dynamic-threshold heuristic rather than dropping
+            // the suggestion entirely.
+            const float thresholdDb = juce::jlimit (-50.0f, -6.0f, overallAvgDb - 8.0f);
+            suggestions.push_back ({ (float) r.freqHz, 0.0f, 5.0f, true, FilterShape::Bell, thresholdDb, 3.0f, r.prominence });
+        }
+    }
+
+    // ---- Low Cut / High Cut: a genuinely trained decision (see
+    // Models/README.md) about whether the source has actual rumble or
+    // hiss/harshness needing a real cut, not just a gentle shelf -- the
+    // spectral-balance pass above never suggests an actual High Pass/Low
+    // Pass, only shelf boosts/cuts on the two bookend bands.
+    {
+        const auto cutFeatures = eqAssistCutFeatures (capturedDb, currentSampleRate, spectrumFftSize);
+        const auto cutSuggestion = eqAssistModel.predictCut (cutFeatures);
+
+        if (cutSuggestion.has_value())
+        {
+            if (cutSuggestion->needsLowCut)
+                suggestions.push_back ({ cutSuggestion->lowCutFreqHz, 0.0f, 0.7f,
+                                          false, FilterShape::HighPass, -20.0f, 2.0f, 6.0f });
+            if (cutSuggestion->needsHighCut)
+                suggestions.push_back ({ cutSuggestion->highCutFreqHz, 0.0f, 0.7f,
+                                          false, FilterShape::LowPass, -20.0f, 2.0f, 6.0f });
+        }
     }
 
     if (suggestions.empty())
@@ -1245,6 +1568,27 @@ void MultiModeEQAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, 
 
     updateSpectrumAnalyser (mainBuffer);
     updateOutputLevelMeter (mainBuffer);
+
+    // ---- Masking-aware AI Assist: publish this instance's own spectrum --------
+    // into the cross-process mix registry periodically (not every block --
+    // other instances only need a fresh-ish read, and copying 1024 bins
+    // under spectrumLock is cheap but not free).
+    samplesSinceLastMixRegistryPublish += numSamples;
+    if (samplesSinceLastMixRegistryPublish >= (int) currentSampleRate / 4) // ~4x/sec
+    {
+        samplesSinceLastMixRegistryPublish = 0;
+        bool haveSnapshot = false;
+        {
+            const juce::SpinLock::ScopedLockType lock (spectrumLock);
+            if (spectrumMagnitudesDb.size() == mixRegistryPublishScratch.size())
+            {
+                std::copy (spectrumMagnitudesDb.begin(), spectrumMagnitudesDb.end(), mixRegistryPublishScratch.begin());
+                haveSnapshot = true;
+            }
+        }
+        if (haveSnapshot)
+            eqMixRegistry.publish (computeMixRegistryProfile (mixRegistryPublishScratch, currentSampleRate, spectrumFftSize));
+    }
 
     // ---- Feed the split-band oscilloscope ------------------------------------
     // Mono-sum the (already EQ'd) output, then push it through each of the

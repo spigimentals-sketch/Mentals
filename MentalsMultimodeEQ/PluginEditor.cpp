@@ -1,6 +1,5 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
-#include "MultiModeEQBinaryData.h"
 #include <limits>
 #include <algorithm>
 #include <cmath>
@@ -459,11 +458,9 @@ void SpectrumAnalyserComponent::paint (juce::Graphics& g)
 MultiModeEQAudioProcessorEditor::MultiModeEQAudioProcessorEditor (MultiModeEQAudioProcessor& p)
     : AudioProcessorEditor (&p), processor (p), analyser (p), outputMeter (p)
 {
-    setLookAndFeel (&MentalsUI::MentalsLookAndFeel::getSharedInstance());
+    setLookAndFeel (&hardwareLookAndFeel);
 
     // ---- Top bar: logo (left) + preset select/save (right of logo) -----------
-    logoImage.setImage (juce::ImageFileFormat::loadFrom (MultiModeEQBinaryData::logo_png, (size_t) MultiModeEQBinaryData::logo_pngSize));
-    logoImage.setImagePlacement (juce::RectanglePlacement::centred);
     addAndMakeVisible (logoImage);
 
     presetsButton.setColour (juce::TextButton::buttonColourId,  EditorColours::slateGrayDark);
@@ -1050,16 +1047,34 @@ void MultiModeEQAudioProcessorEditor::promptToSavePreset()
 
 void MultiModeEQAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (EditorColours::charcoalBlack);
+    g.fillAll (juce::Colour (0xff0c0c0d));
 
     auto topBarArea = getLocalBounds().removeFromTop (40);
-    g.setColour (EditorColours::slateGrayDark);
-    g.fillRect (topBarArea);
+    MentalsUI::HardwareLookAndFeel::drawMetalPanel (g, topBarArea.toFloat());
+
+    if (! lastPanelBounds.isEmpty())
+    {
+        auto panelBoundsF = lastPanelBounds.toFloat();
+        MentalsUI::HardwareLookAndFeel::drawMetalPanel (g, panelBoundsF);
+
+        constexpr float inset = 10.0f;
+        MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getX() + inset, panelBoundsF.getY() + inset });
+        MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getRight() - inset, panelBoundsF.getY() + inset });
+        MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getX() + inset, panelBoundsF.getBottom() - inset });
+        MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getRight() - inset, panelBoundsF.getBottom() - inset });
+    }
+
+    constexpr float earWidth = 22.0f;
+    auto fullBounds = getLocalBounds().toFloat();
+    MentalsUI::HardwareLookAndFeel::drawRackEar (g, fullBounds.removeFromLeft (earWidth).reduced (2.0f));
+    MentalsUI::HardwareLookAndFeel::drawRackEar (g, fullBounds.removeFromRight (earWidth).reduced (2.0f));
 }
 
 void MultiModeEQAudioProcessorEditor::resized()
 {
     auto area = getLocalBounds();
+    area.removeFromLeft (24);
+    area.removeFromRight (24);
 
     constexpr int topBarHeight   = 40;
     constexpr int splitterHeight = 8;
@@ -1091,6 +1106,8 @@ void MultiModeEQAudioProcessorEditor::resized()
     auto tabsArea      = area.removeFromBottom (tabsHeight);
     auto splitterArea  = area.removeFromBottom (splitterHeight);
     auto analyserArea  = area; // everything left above the splitter
+
+    lastPanelBounds = panelArea;
 
     analyser.setBounds (analyserArea.reduced (8));
     analyserSplitter.setBounds (splitterArea);

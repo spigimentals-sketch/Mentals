@@ -1,6 +1,5 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
-#include "BinaryData.h"
 
 //==============================================================================
 // CircuitCompCurveComponent
@@ -216,14 +215,12 @@ void MultibandSpectrumComponent::mouseUp (const juce::MouseEvent&)
 //==============================================================================
 MentalsCircuitCompAudioProcessorEditor::MentalsCircuitCompAudioProcessorEditor (MentalsCircuitCompAudioProcessor& p)
     : AudioProcessorEditor (&p), processor (p), curve (p), spectrum (p),
-      gainReductionMeter ([&p] { return p.getGainReductionDb(); }),
-      vuMeter ([&p] { return p.getGainReductionDb(); }),
-      outputMeter ([&p] { return p.getOutputPeakDb(); }, [&p] { return p.isOutputClipping(); })
+      gainReductionMeter ([&p] { return p.getGainReductionDb(); }, true),
+      vuMeter ([&p] { return p.getInputPeakDb(); }),
+      outputMeter ([&p] { return p.getOutputPeakDb(); })
 {
-    setLookAndFeel (&MentalsUI::MentalsLookAndFeel::getSharedInstance());
+    setLookAndFeel (&hardwareLookAndFeel);
 
-    logoImage.setImage (juce::ImageFileFormat::loadFrom (BinaryData::mentals_logo_png, (size_t) BinaryData::mentals_logo_pngSize));
-    logoImage.setImagePlacement (juce::RectanglePlacement::centred);
     addAndMakeVisible (logoImage);
 
     productNameLabel.setText ("Circuit Comp", juce::dontSendNotification);
@@ -308,7 +305,7 @@ MentalsCircuitCompAudioProcessorEditor::MentalsCircuitCompAudioProcessorEditor (
     addAndMakeVisible (gainReductionMeterLabel);
     addAndMakeVisible (gainReductionMeter);
 
-    vuMeterLabel.setText ("VU", juce::dontSendNotification);
+    vuMeterLabel.setText ("In", juce::dontSendNotification);
     vuMeterLabel.setColour (juce::Label::textColourId, MentalsUI::Colours::white);
     vuMeterLabel.setJustificationType (juce::Justification::centred);
     vuMeterLabel.attachToComponent (&vuMeter, false);
@@ -522,16 +519,34 @@ void MentalsCircuitCompAudioProcessorEditor::promptToSavePreset()
 
 void MentalsCircuitCompAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (MentalsUI::Colours::charcoalBlack);
+    g.fillAll (juce::Colour (0xff0c0c0d));
 
     auto topBarArea = getLocalBounds().removeFromTop (40);
-    g.setColour (MentalsUI::Colours::slateGrayDark);
-    g.fillRect (topBarArea);
+    MentalsUI::HardwareLookAndFeel::drawMetalPanel (g, topBarArea.toFloat());
+
+    if (! lastPanelBounds.isEmpty())
+    {
+        auto panelBoundsF = lastPanelBounds.toFloat();
+        MentalsUI::HardwareLookAndFeel::drawMetalPanel (g, panelBoundsF);
+
+        constexpr float inset = 10.0f;
+        MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getX() + inset, panelBoundsF.getY() + inset });
+        MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getRight() - inset, panelBoundsF.getY() + inset });
+        MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getX() + inset, panelBoundsF.getBottom() - inset });
+        MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getRight() - inset, panelBoundsF.getBottom() - inset });
+    }
+
+    constexpr float earWidth = 22.0f;
+    auto fullBounds = getLocalBounds().toFloat();
+    MentalsUI::HardwareLookAndFeel::drawRackEar (g, fullBounds.removeFromLeft (earWidth).reduced (2.0f));
+    MentalsUI::HardwareLookAndFeel::drawRackEar (g, fullBounds.removeFromRight (earWidth).reduced (2.0f));
 }
 
 void MentalsCircuitCompAudioProcessorEditor::resized()
 {
     auto area = getLocalBounds();
+    area.removeFromLeft (24);
+    area.removeFromRight (24);
 
     constexpr int topBarHeight   = 40;
     constexpr int tabsHeight     = 28;
@@ -564,6 +579,8 @@ void MentalsCircuitCompAudioProcessorEditor::resized()
     auto splitterArea = area.removeFromBottom (splitterHeight);
     auto tabsArea     = area.removeFromBottom (tabsHeight);
     auto graphArea    = area;
+
+    lastPanelBounds = panelArea;
 
     curve.setBounds (graphArea.reduced (8));
     spectrum.setBounds (graphArea.reduced (8));

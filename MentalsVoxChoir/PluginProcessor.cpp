@@ -16,6 +16,8 @@ MentalsVoxChoirAudioProcessor::MentalsVoxChoirAudioProcessor()
     timingParam  = dynamic_cast<juce::AudioParameterFloat*>  (apvts.getParameter ("timing"));
     spreadParam  = dynamic_cast<juce::AudioParameterFloat*>  (apvts.getParameter ("spread"));
     mixParam     = dynamic_cast<juce::AudioParameterFloat*>  (apvts.getParameter ("mix"));
+    softnessParam = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("softness"));
+    lowCutParam   = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("lowCut"));
 
     seedFactoryPresetsIfMissing();
 }
@@ -53,6 +55,16 @@ juce::AudioProcessorValueTreeState::ParameterLayout MentalsVoxChoirAudioProcesso
         juce::NormalisableRange<float> (0.0f, 100.0f, 0.01f), 100.0f,
         juce::AudioParameterFloatAttributes().withLabel ("%")));
 
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "softness", "Softness",
+        juce::NormalisableRange<float> (0.0f, 100.0f, 0.01f), 0.0f,
+        juce::AudioParameterFloatAttributes().withLabel ("%")));
+
+    params.push_back (std::make_unique<juce::AudioParameterFloat> (
+        "lowCut", "Low Cut",
+        juce::NormalisableRange<float> (20.0f, 500.0f, 0.1f, 0.35f), 20.0f, // 20Hz default is effectively off
+        juce::AudioParameterFloatAttributes().withLabel ("Hz")));
+
     return { params.begin(), params.end() };
 }
 
@@ -75,6 +87,20 @@ void MentalsVoxChoirAudioProcessor::prepareToPlay (double sampleRate, int sample
 
     outputPeakLinear = 0.0f;
     clipHoldBlocksRemaining = 0;
+
+    for (auto& shelf : softnessShelf)
+        shelf.reset();
+    lastSoftnessShelfGainDb = 1.0f; // not a valid gain -- forces applySoftness() to set coefficients on the first block
+    softnessEnvelopes = {};
+
+    for (auto& filter : lowCutFilter)
+        filter.reset();
+    lastLowCutFreqHz = -1.0f; // forces coefficients to be set on the first block
+
+    softnessFastAttackCoeff  = 1.0f - std::exp (-1.0f / (softnessFastAttackSeconds  * (float) sampleRate));
+    softnessFastReleaseCoeff = 1.0f - std::exp (-1.0f / (softnessFastReleaseSeconds * (float) sampleRate));
+    softnessSlowAttackCoeff  = 1.0f - std::exp (-1.0f / (softnessSlowAttackSeconds  * (float) sampleRate));
+    softnessSlowReleaseCoeff = 1.0f - std::exp (-1.0f / (softnessSlowReleaseSeconds * (float) sampleRate));
 }
 
 bool MentalsVoxChoirAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -117,6 +143,15 @@ void MentalsVoxChoirAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
 
     const float voiceScale = 1.0f / std::sqrt ((float) juce::jmax (1, numVoices));
     constexpr float twoPi = juce::MathConstants<float>::twoPi;
+
+    const float lowCutFreqHz = lowCutParam->get();
+    if (lowCutFreqHz != lastLowCutFreqHz)
+    {
+        lastLowCutFreqHz = lowCutFreqHz;
+        auto coeffs = juce::dsp::IIR::Coefficients<float>::makeHighPass (currentSampleRate, lowCutFreqHz, lowCutQ);
+        for (auto& filter : lowCutFilter)
+            filter.coefficients = coeffs;
+    }
 
     auto* left  = buffer.getWritePointer (0);
     auto* right = buffer.getNumChannels() > 1 ? buffer.getWritePointer (1) : left;
@@ -170,11 +205,57 @@ void MentalsVoxChoirAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
         outL *= voiceScale;
         outR *= voiceScale;
 
+        // Only the wet ensemble passes through the high-pass -- the dry
+        // signal's own low end is left completely alone.
+        outL = lowCutFilter[0].processSample (outL);
+        outR = lowCutFilter[1].processSample (outR);
+
         left[n]  = monoIn * (1.0f - mix) + outL * mix;
         right[n] = monoIn * (1.0f - mix) + outR * mix;
     }
 
+    applySoftness (left, right, numSamples, softnessParam->get() * 0.01f);
     updateOutputLevelMeter (buffer);
+}
+
+void MentalsVoxChoirAudioProcessor::applySoftness (float* left, float* right, int numSamples, float softnessAmount) noexcept
+{
+    if (softnessAmount <= 0.0f)
+        return;
+
+    const float shelfGainDb = softnessMaxShelfCutDb * softnessAmount;
+    if (shelfGainDb != lastSoftnessShelfGainDb)
+    {
+        lastSoftnessShelfGainDb = shelfGainDb;
+        auto coeffs = juce::dsp::IIR::Coefficients<float>::makeHighShelf (
+            currentSampleRate, softnessShelfFreqHz, softnessShelfQ, juce::Decibels::decibelsToGain (shelfGainDb));
+        for (auto& shelf : softnessShelf)
+            shelf.coefficients = coeffs;
+    }
+
+    float* channels[2] = { left, right };
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        auto* samples = channels[(size_t) ch];
+        auto& env = softnessEnvelopes[(size_t) ch];
+
+        for (int n = 0; n < numSamples; ++n)
+        {
+            float sample = softnessShelf[(size_t) ch].processSample (samples[n]);
+
+            const float rectified = std::abs (sample);
+            env.fast += (rectified - env.fast) * (rectified > env.fast ? softnessFastAttackCoeff : softnessFastReleaseCoeff);
+            env.slow += (rectified - env.slow) * (rectified > env.slow ? softnessSlowAttackCoeff : softnessSlowReleaseCoeff);
+
+            // How far the fast (transient) envelope pokes out above the slow
+            // (sustained) one, as a fraction of the fast envelope itself --
+            // 0 for steady tone, approaching 1 right on a sharp attack.
+            const float excessFraction = env.fast > 1.0e-6f ? juce::jmax (0.0f, env.fast - env.slow) / env.fast : 0.0f;
+            const float transientGain = 1.0f - juce::jmin (softnessMaxTransientCut, softnessAmount * excessFraction);
+
+            samples[n] = sample * transientGain;
+        }
+    }
 }
 
 void MentalsVoxChoirAudioProcessor::updateOutputLevelMeter (const juce::AudioBuffer<float>& buffer)

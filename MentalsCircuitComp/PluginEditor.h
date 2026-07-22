@@ -112,13 +112,20 @@ private:
     int selectedBand = 0;
     bool lastMultibandState = false;
 
+    MentalsUI::HardwareLookAndFeel hardwareLookAndFeel;
+
+    // Set in resized(), read back in paint() so the metal-panel texture,
+    // corner screws, and rack ears are drawn over exactly the same area the
+    // knobs sit in.
+    juce::Rectangle<int> lastPanelBounds;
+
     //==========================================================================
     // Top bar: shared MENTALS wordmark + product name, Mode selector (the
     // headline feature, so it sits in the top bar rather than the knob
     // panel), Use Sidechain / Multiband / Stereo Link toggles, preset
     // select/save.
     //==========================================================================
-    juce::ImageComponent logoImage;
+    MentalsUI::MetallicLogoComponent logoImage;
     juce::Label productNameLabel;
     juce::Label modeLabel;
     juce::ComboBox modeSelector;
@@ -160,9 +167,9 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> bandMuteAttachment, bandSoloAttachment;
 
     juce::Label gainReductionMeterLabel, vuMeterLabel, outputMeterLabel;
-    MentalsUI::GainReductionMeterComponent gainReductionMeter;
-    MentalsUI::VuMeterComponent vuMeter;
-    MentalsUI::LevelMeterComponent outputMeter;
+    MentalsUI::AnalogVUMeterComponent gainReductionMeter;
+    MentalsUI::AnalogVUMeterComponent vuMeter;
+    MentalsUI::AnalogVUMeterComponent outputMeter;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MentalsCircuitCompAudioProcessorEditor)
 };

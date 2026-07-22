@@ -110,6 +110,7 @@ public:
 
     juce::AudioParameterChoice* keyParam               = nullptr;
     juce::AudioParameterChoice* scaleParam             = nullptr;
+    juce::AudioParameterChoice* voiceTypeParam         = nullptr;
     juce::AudioParameterFloat*  retuneSpeedParam       = nullptr;
     juce::AudioParameterFloat*  amountParam            = nullptr;
     juce::AudioParameterFloat*  mixParam               = nullptr;
@@ -166,6 +167,12 @@ private:
     // rare occasion the toggle actually changes, not continuously.
     void reconfigureAnalysisWindowIfNeeded();
 
+    // Voice Type narrows the detector's min/max frequency search band to a
+    // real singer's actual range (see PitchDSP::getVoiceTypeRanges()).
+    // Checked once per block; only recomputes the two floats when the
+    // parameter has actually changed.
+    void reconfigureVoiceRangeIfNeeded();
+
     // Writes out the built-in Natural/Robotic/Trap/Choral style presets the
     // first time this plugin runs (skipping any name the user has already
     // saved over), so they show up in the presets dropdown like any other
@@ -174,13 +181,27 @@ private:
 
     double currentSampleRate = 44100.0;
 
-    static constexpr float minDetectableFreqHz = 70.0f;
-    static constexpr float maxDetectableFreqHz = 1200.0f;
+    // Voice Type's selected range (see PitchDSP::getVoiceTypeRanges());
+    // defaults match "Auto (Wide Range)" until reconfigureVoiceRangeIfNeeded()
+    // runs its forced first-block update.
+    float currentMinFreqHz = 70.0f;
+    float currentMaxFreqHz = 1200.0f;
+    int lastVoiceTypeIndexApplied = -1; // forces a reconfigure on the first block
+
     static constexpr float voicedConfidenceThreshold = 0.45f;
     static constexpr int maxSupportedChannels = 8;
 
     static constexpr double normalWindowSeconds     = 0.046;
-    static constexpr double lowLatencyWindowSeconds = 0.012;
+
+    // 20ms rather than the original 12ms: with detectPitch()'s overlap
+    // floor (see PitchDSP.h), a window has to be roughly double the period
+    // of the lowest frequency it can reliably resolve. At 12ms, that floor
+    // sat above 150Hz for every Voice Type except Soprano -- meaning Low-
+    // Latency Mode silently couldn't track most male voices at all, however
+    // confident-looking its (spurious) detections were. 20ms lowers that
+    // floor to ~100Hz, covering bass/baritone/tenor while still reacting
+    // noticeably faster than Normal Mode's 46ms.
+    static constexpr double lowLatencyWindowSeconds = 0.020;
     bool lastLowLatencyModeApplied = false; // forces a reconfigure on the first block
 
     int windowSizeSamples = 2048;
@@ -194,8 +215,20 @@ private:
     int samplesUntilNextHop = 0;
     std::vector<float> analysisWorkspace;
 
-    float targetRatio    = 1.0f; // updated once per detection cycle
-    float smoothedRatio  = 1.0f; // glides towards targetRatio every sample, at Retune Speed's rate
+    // targetRatio is updated once per detection cycle (see
+    // runPitchDetectionAndUpdateTarget()); targetCents mirrors it (1200 *
+    // log2(targetRatio)), recomputed at the same time. Smoothing towards
+    // the target happens in cents (smoothedCents), not linear ratio space:
+    // ratio and perceived pitch are related exponentially, so gliding
+    // linearly between two ratios doesn't correspond to a perceptually
+    // constant-rate pitch movement -- most audible on larger corrections
+    // (Harmonizer intervals, MIDI Control jumps, a big Flex-Tune swoop),
+    // where a linear-ratio glide can sound like it rushes at one end and
+    // drags at the other instead of sliding evenly. The actual ratio fed to
+    // the pitch shifter is derived from smoothedCents once per sample.
+    float targetRatio   = 1.0f;
+    float targetCents   = 0.0f;
+    float smoothedCents = 0.0f;
 
     std::array<PitchDSP::PitchShifterChannel, maxSupportedChannels> pitchShifters;
 
@@ -235,8 +268,8 @@ private:
     // updated during ordinary scale-snapping (see class comment); the
     // "smoothed" values glide at the same rate as the main voice.
     std::array<PitchDSP::PitchShifterChannel, maxSupportedChannels> harmony1Shifters, harmony2Shifters;
-    float targetHarmony1Ratio = 1.0f, smoothedHarmony1Ratio = 1.0f;
-    float targetHarmony2Ratio = 1.0f, smoothedHarmony2Ratio = 1.0f;
+    float targetHarmony1Ratio = 1.0f, targetHarmony1Cents = 0.0f, smoothedHarmony1Cents = 0.0f;
+    float targetHarmony2Ratio = 1.0f, targetHarmony2Cents = 0.0f, smoothedHarmony2Cents = 0.0f;
 
     // AI Assist capture: a plain buffer of detected semitone values filled
     // by the audio thread (runPitchDetectionAndUpdateTarget(), only ever

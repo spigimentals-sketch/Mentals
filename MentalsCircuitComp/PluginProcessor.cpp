@@ -307,6 +307,7 @@ void MentalsCircuitCompAudioProcessor::prepareToPlay (double sampleRate, int sam
     currentGainReductionDb.store (0.0f);
     for (auto& gr : bandGainReductionDb)
         gr.store (0.0f);
+    inputPeakLinear = 0.0f;
     outputPeakLinear = 0.0f;
     clipHoldBlocksRemaining = 0;
 }
@@ -375,6 +376,9 @@ void MentalsCircuitCompAudioProcessor::processBlock (juce::AudioBuffer<float>& b
     auto mainBuffer = getBusBuffer (buffer, true, 0);
     auto sidechainBuffer = getBusCount (true) > 1 ? getBusBuffer (buffer, true, 1) : juce::AudioBuffer<float>();
     const bool useSidechain = useSidechainParam->get() && sidechainBuffer.getNumChannels() > 0;
+
+    // Captured before any of the processing below mutates mainBuffer in place.
+    updateInputLevelMeter (mainBuffer);
 
     const int numChannels = juce::jmin (2, mainBuffer.getNumChannels());
     const int numSamples  = mainBuffer.getNumSamples();
@@ -546,6 +550,17 @@ void MentalsCircuitCompAudioProcessor::processBlock (juce::AudioBuffer<float>& b
     }
 
     updateOutputLevelMeter (mainBuffer);
+}
+
+void MentalsCircuitCompAudioProcessor::updateInputLevelMeter (const juce::AudioBuffer<float>& buffer)
+{
+    float peak = 0.0f;
+    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+        peak = juce::jmax (peak, buffer.getMagnitude (ch, 0, buffer.getNumSamples()));
+
+    const float releasePerBlock = std::pow (10.0f, -24.0f * ((float) buffer.getNumSamples() / (float) currentSampleRate) / 20.0f);
+    const float previous = inputPeakLinear.load();
+    inputPeakLinear.store (juce::jmax (peak, previous * releasePerBlock));
 }
 
 void MentalsCircuitCompAudioProcessor::updateOutputLevelMeter (const juce::AudioBuffer<float>& buffer)

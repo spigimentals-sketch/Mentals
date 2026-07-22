@@ -13,6 +13,13 @@
 // graphs (all pure functions of their parameters), this one is inherently
 // live audio-derived data, since pitch is a time-varying property of the
 // incoming signal, not something a knob alone determines.
+//
+// Also overlays the actual note name(s) being hit -- "the keys a vocal is
+// hitting" -- in the top-right corner: the detected (sung) note large and
+// gold, the corrected target note smaller and blue underneath, both via
+// PitchDSP::frequencyToNoteName(). The scrolling graph shows the shape of
+// pitch movement; this overlay answers "what note is that" at a glance
+// without having to read semitone positions off the graph.
 //==============================================================================
 class PitchHistoryComponent : public juce::Component,
                                private juce::Timer
@@ -73,13 +80,20 @@ private:
 
     MentalsAutotuneAudioProcessor& processor;
 
+    MentalsUI::HardwareLookAndFeel hardwareLookAndFeel;
+
+    // Set in resized(), read back in paint() so the metal-panel texture,
+    // corner screws, and rack ears are drawn over exactly the same area the
+    // knobs sit in.
+    juce::Rectangle<int> lastPanelBounds;
+
     //==========================================================================
     // Top bar: shared MENTALS wordmark + product name, preset select/save,
     // Settings (opens a popup -- see showSettingsPanel()) holding every
     // toggle-style mode/behaviour, keeping the main panel focused on the
     // controls used every session (Key/Scale/Retune Speed/Amount/Mix).
     //==========================================================================
-    juce::ImageComponent logoImage;
+    MentalsUI::MetallicLogoComponent logoImage;
     juce::Label productNameLabel;
     juce::ComboBox presetSelector;
     juce::TextButton presetSaveButton { "Save" };
@@ -96,17 +110,17 @@ private:
     //==========================================================================
     // Controls.
     //==========================================================================
-    juce::Label keyLabel, scaleLabel;
-    juce::ComboBox keySelector, scaleSelector;
+    juce::Label keyLabel, scaleLabel, voiceTypeLabel;
+    juce::ComboBox keySelector, scaleSelector, voiceTypeSelector;
     MentalsUI::LabelledSlider retuneSpeedSlider, amountSlider, flexAmountSlider;
     MentalsUI::LabelledFader mixSlider; // dry/wet blend reads more naturally as a fader than a knob
 
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> keyAttachment, scaleAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> keyAttachment, scaleAttachment, voiceTypeAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
         retuneSpeedAttachment, amountAttachment, mixAttachment, flexAmountAttachment;
 
     juce::Label outputMeterLabel;
-    MentalsUI::LevelMeterComponent outputMeter;
+    MentalsUI::AnalogVUMeterComponent outputMeter;
 
     //==========================================================================
     // Settings popup content: every toggle-style mode/behaviour, all with

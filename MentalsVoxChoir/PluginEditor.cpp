@@ -1,6 +1,5 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
-#include "BinaryData.h"
 
 //==============================================================================
 // ChoirSpreadComponent
@@ -48,10 +47,8 @@ MentalsVoxChoirAudioProcessorEditor::MentalsVoxChoirAudioProcessorEditor (Mental
     : AudioProcessorEditor (&p), processor (p), choirSpread (p),
       outputMeter ([&p] { return p.getOutputPeakDb(); }, [&p] { return p.isOutputClipping(); })
 {
-    setLookAndFeel (&MentalsUI::MentalsLookAndFeel::getSharedInstance());
+    setLookAndFeel (&hardwareLookAndFeel);
 
-    logoImage.setImage (juce::ImageFileFormat::loadFrom (BinaryData::mentals_logo_png, (size_t) BinaryData::mentals_logo_pngSize));
-    logoImage.setImagePlacement (juce::RectanglePlacement::centred);
     addAndMakeVisible (logoImage);
 
     productNameLabel.setText ("Vox Choir", juce::dontSendNotification);
@@ -89,11 +86,13 @@ MentalsVoxChoirAudioProcessorEditor::MentalsVoxChoirAudioProcessorEditor (Mental
     voicesSelector.setColour (juce::ComboBox::arrowColourId,      MentalsUI::Colours::white);
     addAndMakeVisible (voicesSelector);
 
-    vibratoSlider.addToParent ("Vibrato", *this);
-    pitchSlider.addToParent   ("Pitch",   *this);
-    timingSlider.addToParent  ("Timing",  *this);
-    spreadSlider.addToParent  ("Spread",  *this);
-    mixSlider.addToParent     ("Mix",     *this);
+    vibratoSlider.addToParent  ("Vibrato",  *this);
+    pitchSlider.addToParent    ("Pitch",    *this);
+    timingSlider.addToParent   ("Timing",   *this);
+    spreadSlider.addToParent   ("Spread",   *this);
+    softnessSlider.addToParent ("Softness", *this);
+    lowCutSlider.addToParent   ("Low Cut",  *this);
+    mixSlider.addToParent      ("Mix",      *this);
 
     outputMeterLabel.setText ("Out", juce::dontSendNotification);
     outputMeterLabel.setColour (juce::Label::textColourId, MentalsUI::Colours::white);
@@ -112,12 +111,16 @@ MentalsVoxChoirAudioProcessorEditor::MentalsVoxChoirAudioProcessorEditor (Mental
         processor.apvts, "timing", timingSlider.slider);
     spreadAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processor.apvts, "spread", spreadSlider.slider);
+    softnessAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        processor.apvts, "softness", softnessSlider.slider);
+    lowCutAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        processor.apvts, "lowCut", lowCutSlider.slider);
     mixAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processor.apvts, "mix", mixSlider.slider);
 
     setResizable (true, true);
-    setResizeLimits (620, 460, 1300, 900);
-    setSize (860, 600);
+    setResizeLimits (760, 460, 1400, 900);
+    setSize (980, 600);
 }
 
 MentalsVoxChoirAudioProcessorEditor::~MentalsVoxChoirAudioProcessorEditor()
@@ -189,16 +192,34 @@ void MentalsVoxChoirAudioProcessorEditor::promptToSavePreset()
 
 void MentalsVoxChoirAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (MentalsUI::Colours::charcoalBlack);
+    g.fillAll (juce::Colour (0xff0c0c0d));
 
     auto topBarArea = getLocalBounds().removeFromTop (40);
-    g.setColour (MentalsUI::Colours::slateGrayDark);
-    g.fillRect (topBarArea);
+    MentalsUI::HardwareLookAndFeel::drawMetalPanel (g, topBarArea.toFloat());
+
+    if (! lastPanelBounds.isEmpty())
+    {
+        auto panelBoundsF = lastPanelBounds.toFloat();
+        MentalsUI::HardwareLookAndFeel::drawMetalPanel (g, panelBoundsF);
+
+        constexpr float inset = 10.0f;
+        MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getX() + inset, panelBoundsF.getY() + inset });
+        MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getRight() - inset, panelBoundsF.getY() + inset });
+        MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getX() + inset, panelBoundsF.getBottom() - inset });
+        MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getRight() - inset, panelBoundsF.getBottom() - inset });
+    }
+
+    constexpr float earWidth = 22.0f;
+    auto fullBounds = getLocalBounds().toFloat();
+    MentalsUI::HardwareLookAndFeel::drawRackEar (g, fullBounds.removeFromLeft (earWidth).reduced (2.0f));
+    MentalsUI::HardwareLookAndFeel::drawRackEar (g, fullBounds.removeFromRight (earWidth).reduced (2.0f));
 }
 
 void MentalsVoxChoirAudioProcessorEditor::resized()
 {
     auto area = getLocalBounds();
+    area.removeFromLeft (24);
+    area.removeFromRight (24);
 
     constexpr int topBarHeight   = 40;
     constexpr int splitterHeight = 8;
@@ -220,6 +241,8 @@ void MentalsVoxChoirAudioProcessorEditor::resized()
     auto splitterArea = area.removeFromBottom (splitterHeight);
     auto graphArea    = area;
 
+    lastPanelBounds = panelArea;
+
     choirSpread.setBounds (graphArea.reduced (8));
     splitter.setBounds (splitterArea);
 
@@ -227,7 +250,8 @@ void MentalsVoxChoirAudioProcessorEditor::resized()
     p.removeFromTop (20); // headroom for each knob's attachToComponent label above it
 
     juce::Array<juce::Component*> knobs { &voicesSelector, &vibratoSlider.slider, &pitchSlider.slider,
-                                           &timingSlider.slider, &spreadSlider.slider, &mixSlider.slider, &outputMeter };
+                                           &timingSlider.slider, &spreadSlider.slider, &softnessSlider.slider,
+                                           &lowCutSlider.slider, &mixSlider.slider, &outputMeter };
     const int cellWidth = p.getWidth() / knobs.size();
     for (auto* knob : knobs)
     {

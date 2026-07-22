@@ -1,6 +1,5 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
-#include "BinaryData.h"
 
 //==============================================================================
 // LfoPreviewComponent
@@ -52,12 +51,10 @@ void LfoPreviewComponent::paint (juce::Graphics& g)
 //==============================================================================
 MentalsChorusAudioProcessorEditor::MentalsChorusAudioProcessorEditor (MentalsChorusAudioProcessor& p)
     : AudioProcessorEditor (&p), processor (p), lfoPreview (p),
-      outputMeter ([&p] { return p.getOutputPeakDb(); }, [&p] { return p.isOutputClipping(); })
+      outputMeter ([&p] { return p.getOutputPeakDb(); })
 {
-    setLookAndFeel (&MentalsUI::MentalsLookAndFeel::getSharedInstance());
+    setLookAndFeel (&hardwareLookAndFeel);
 
-    logoImage.setImage (juce::ImageFileFormat::loadFrom (BinaryData::mentals_logo_png, (size_t) BinaryData::mentals_logo_pngSize));
-    logoImage.setImagePlacement (juce::RectanglePlacement::centred);
     addAndMakeVisible (logoImage);
 
     productNameLabel.setText ("Chorus", juce::dontSendNotification);
@@ -180,16 +177,34 @@ void MentalsChorusAudioProcessorEditor::promptToSavePreset()
 
 void MentalsChorusAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (MentalsUI::Colours::charcoalBlack);
+    g.fillAll (juce::Colour (0xff0c0c0d));
 
     auto topBarArea = getLocalBounds().removeFromTop (40);
-    g.setColour (MentalsUI::Colours::slateGrayDark);
-    g.fillRect (topBarArea);
+    MentalsUI::HardwareLookAndFeel::drawMetalPanel (g, topBarArea.toFloat());
+
+    if (! lastPanelBounds.isEmpty())
+    {
+        auto panelBoundsF = lastPanelBounds.toFloat();
+        MentalsUI::HardwareLookAndFeel::drawMetalPanel (g, panelBoundsF);
+
+        constexpr float inset = 10.0f;
+        MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getX() + inset, panelBoundsF.getY() + inset });
+        MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getRight() - inset, panelBoundsF.getY() + inset });
+        MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getX() + inset, panelBoundsF.getBottom() - inset });
+        MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getRight() - inset, panelBoundsF.getBottom() - inset });
+    }
+
+    constexpr float earWidth = 22.0f;
+    auto fullBounds = getLocalBounds().toFloat();
+    MentalsUI::HardwareLookAndFeel::drawRackEar (g, fullBounds.removeFromLeft (earWidth).reduced (2.0f));
+    MentalsUI::HardwareLookAndFeel::drawRackEar (g, fullBounds.removeFromRight (earWidth).reduced (2.0f));
 }
 
 void MentalsChorusAudioProcessorEditor::resized()
 {
     auto area = getLocalBounds();
+    area.removeFromLeft (24);
+    area.removeFromRight (24);
 
     constexpr int topBarHeight   = 40;
     constexpr int splitterHeight = 8;
@@ -210,6 +225,8 @@ void MentalsChorusAudioProcessorEditor::resized()
     auto panelArea    = area.removeFromBottom (panelHeight);
     auto splitterArea = area.removeFromBottom (splitterHeight);
     auto graphArea    = area;
+
+    lastPanelBounds = panelArea;
 
     lfoPreview.setBounds (graphArea.reduced (8));
     splitter.setBounds (splitterArea);

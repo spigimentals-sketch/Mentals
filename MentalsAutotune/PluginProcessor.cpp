@@ -11,6 +11,7 @@ MentalsAutotuneAudioProcessor::MentalsAutotuneAudioProcessor()
 {
     keyParam                 = dynamic_cast<juce::AudioParameterChoice*> (apvts.getParameter ("key"));
     scaleParam               = dynamic_cast<juce::AudioParameterChoice*> (apvts.getParameter ("scale"));
+    voiceTypeParam           = dynamic_cast<juce::AudioParameterChoice*> (apvts.getParameter ("voiceType"));
     retuneSpeedParam         = dynamic_cast<juce::AudioParameterFloat*>  (apvts.getParameter ("retuneSpeed"));
     amountParam              = dynamic_cast<juce::AudioParameterFloat*>  (apvts.getParameter ("amount"));
     mixParam                 = dynamic_cast<juce::AudioParameterFloat*>  (apvts.getParameter ("mix"));
@@ -98,14 +99,30 @@ juce::AudioProcessorValueTreeState::ParameterLayout MentalsAutotuneAudioProcesso
 
     params.push_back (std::make_unique<juce::AudioParameterChoice> ("scale", "Scale", scaleNames, 0));
 
+    // Built from PitchDSP::getVoiceTypeRanges() for the same reason as
+    // "scale" above -- the parameter's choices and the actual min/max
+    // detection range used at runtime can never drift out of sync.
+    juce::StringArray voiceTypeNames;
+    for (auto& range : PitchDSP::getVoiceTypeRanges())
+        voiceTypeNames.add (range.name);
+
+    params.push_back (std::make_unique<juce::AudioParameterChoice> ("voiceType", "Voice Type", voiceTypeNames, 0));
+
+    // Defaults match the built-in "Natural" style preset (see
+    // ensureFactoryPresetsExist()) rather than the previous out-of-the-box
+    // defaults of 100% Amount / 50ms Retune Speed, which correct hard and
+    // fast enough to sound close to a robotic hard-tune -- a jarring first
+    // impression for anyone loading the plugin fresh and expecting ordinary
+    // pitch correction. Robotic/Trap are still one preset click away for
+    // anyone who wants that sound deliberately.
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "retuneSpeed", "Retune Speed",
-        juce::NormalisableRange<float> (1.0f, 500.0f, 0.01f, 0.4f), 50.0f,
+        juce::NormalisableRange<float> (1.0f, 500.0f, 0.01f, 0.4f), 120.0f,
         juce::AudioParameterFloatAttributes().withLabel ("ms")));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "amount", "Amount",
-        juce::NormalisableRange<float> (0.0f, 100.0f, 0.01f), 100.0f,
+        juce::NormalisableRange<float> (0.0f, 100.0f, 0.01f), 60.0f,
         juce::AudioParameterFloatAttributes().withLabel ("%")));
 
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
@@ -166,13 +183,18 @@ void MentalsAutotuneAudioProcessor::prepareToPlay (double sampleRate, int sample
     lastLowLatencyModeApplied = ! lowLatencyModeParam->get();
     reconfigureAnalysisWindowIfNeeded();
 
+    // Same forced-refresh trick for Voice Type's min/max detection range.
+    lastVoiceTypeIndexApplied = -1;
+    reconfigureVoiceRangeIfNeeded();
+
     sidechainDetector.prepare (sampleRate, normalWindowSeconds);
     heldMidiNotes.clear();
 
     targetRatio   = 1.0f;
-    smoothedRatio = 1.0f;
-    targetHarmony1Ratio = smoothedHarmony1Ratio = 1.0f;
-    targetHarmony2Ratio = smoothedHarmony2Ratio = 1.0f;
+    targetCents   = 0.0f;
+    smoothedCents = 0.0f;
+    targetHarmony1Ratio = 1.0f; targetHarmony1Cents = 0.0f; smoothedHarmony1Cents = 0.0f;
+    targetHarmony2Ratio = 1.0f; targetHarmony2Cents = 0.0f; smoothedHarmony2Cents = 0.0f;
 
     for (auto& shifter : pitchShifters)
         shifter.prepare (sampleRate);
@@ -228,6 +250,20 @@ void MentalsAutotuneAudioProcessor::reconfigureAnalysisWindowIfNeeded()
     analysisWorkspace.assign ((size_t) windowSizeSamples, 0.0f);
     analysisWritePos = 0;
     samplesUntilNextHop = hopSizeSamples;
+}
+
+void MentalsAutotuneAudioProcessor::reconfigureVoiceRangeIfNeeded()
+{
+    const int voiceTypeIndex = voiceTypeParam->getIndex();
+    if (voiceTypeIndex == lastVoiceTypeIndexApplied)
+        return;
+
+    lastVoiceTypeIndexApplied = voiceTypeIndex;
+
+    const auto& ranges = PitchDSP::getVoiceTypeRanges();
+    const auto& range  = ranges[(size_t) juce::jlimit (0, (int) ranges.size() - 1, voiceTypeIndex)];
+    currentMinFreqHz = range.minFreqHz;
+    currentMaxFreqHz = range.maxFreqHz;
 }
 
 bool MentalsAutotuneAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -286,7 +322,7 @@ void MentalsAutotuneAudioProcessor::runPitchDetectionAndUpdateTarget()
 
     float detectedFreqHz = 0.0f, confidence = 0.0f;
     const bool found = PitchDSP::detectPitch (analysisWorkspace.data(), windowSizeSamples, currentSampleRate,
-                                               minDetectableFreqHz, maxDetectableFreqHz, detectedFreqHz, confidence);
+                                               currentMinFreqHz, currentMaxFreqHz, detectedFreqHz, confidence);
     const bool voicedNow = found && confidence >= voicedConfidenceThreshold;
 
     if (voicedNow)
@@ -417,6 +453,16 @@ void MentalsAutotuneAudioProcessor::runPitchDetectionAndUpdateTarget()
     {
         targetRatio = 1.0f; // no confident pitch and no override active -- pass through unshifted
     }
+
+    // Mirror the ratio targets in cents -- see the class/member comments
+    // for why the per-sample glide smooths in cents rather than linear
+    // ratio space. Recomputed unconditionally here (covering both branches
+    // above, and whether or not either harmony voice is currently enabled)
+    // is simpler and cheap enough at hop rate (tens of Hz) not to bother
+    // gating further.
+    targetCents         = 1200.0f * std::log2 (juce::jmax (1.0e-6f, targetRatio));
+    targetHarmony1Cents = 1200.0f * std::log2 (juce::jmax (1.0e-6f, targetHarmony1Ratio));
+    targetHarmony2Cents = 1200.0f * std::log2 (juce::jmax (1.0e-6f, targetHarmony2Ratio));
 }
 
 float MentalsAutotuneAudioProcessor::computeStabilityScore() const noexcept
@@ -510,6 +556,7 @@ void MentalsAutotuneAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     juce::ScopedNoDenormals noDenormals;
     processIncomingMidi (midi);
     reconfigureAnalysisWindowIfNeeded();
+    reconfigureVoiceRangeIfNeeded();
 
     auto mainBuffer = getBusBuffer (buffer, true, 0);
     auto sidechainBuffer = getBusCount (true) > 1 ? getBusBuffer (buffer, true, 1) : juce::AudioBuffer<float>();
@@ -552,7 +599,7 @@ void MentalsAutotuneAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
             for (int ch = 0; ch < sidechainBuffer.getNumChannels(); ++ch)
                 sidechainSum += sidechainBuffer.getReadPointer (ch)[n];
             const float sidechainMono = sidechainSum / (float) sidechainBuffer.getNumChannels();
-            sidechainDetector.pushSample (sidechainMono, minDetectableFreqHz, maxDetectableFreqHz, voicedConfidenceThreshold);
+            sidechainDetector.pushSample (sidechainMono, currentMinFreqHz, currentMaxFreqHz, voicedConfidenceThreshold);
         }
 
         if (--samplesUntilNextHop <= 0)
@@ -575,9 +622,15 @@ void MentalsAutotuneAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
             effectiveRetuneMs = baseRetuneMs * multiplier;
         }
         const float retuneCoeff = std::exp (-1.0f / (0.001f * effectiveRetuneMs * (float) currentSampleRate));
-        smoothedRatio = retuneCoeff * smoothedRatio + (1.0f - retuneCoeff) * targetRatio;
-        smoothedHarmony1Ratio = retuneCoeff * smoothedHarmony1Ratio + (1.0f - retuneCoeff) * targetHarmony1Ratio;
-        smoothedHarmony2Ratio = retuneCoeff * smoothedHarmony2Ratio + (1.0f - retuneCoeff) * targetHarmony2Ratio;
+        smoothedCents = retuneCoeff * smoothedCents + (1.0f - retuneCoeff) * targetCents;
+        smoothedHarmony1Cents = retuneCoeff * smoothedHarmony1Cents + (1.0f - retuneCoeff) * targetHarmony1Cents;
+        smoothedHarmony2Cents = retuneCoeff * smoothedHarmony2Cents + (1.0f - retuneCoeff) * targetHarmony2Cents;
+
+        // Converted back to ratios once per sample (not per channel) --
+        // this is what the pitch shifters actually need to run.
+        const float smoothedRatio         = std::pow (2.0f, smoothedCents / 1200.0f);
+        const float smoothedHarmony1Ratio = std::pow (2.0f, smoothedHarmony1Cents / 1200.0f);
+        const float smoothedHarmony2Ratio = std::pow (2.0f, smoothedHarmony2Cents / 1200.0f);
 
         for (int ch = 0; ch < numChannels; ++ch)
         {

@@ -90,6 +90,7 @@ public:
             param->setValueNotifyingHost (param->getDefaultValue());
     }
 
+    float getInputPeakDb() const noexcept { return juce::Decibels::gainToDecibels (inputPeakLinear.load(), -100.0f); }
     float getOutputPeakDb() const noexcept { return juce::Decibels::gainToDecibels (outputPeakLinear.load(), -100.0f); }
     bool isOutputClipping() const noexcept { return clipHoldBlocksRemaining.load() > 0; }
     float getGainReductionDb() const noexcept { return currentGainReductionDb.load(); }
@@ -136,6 +137,7 @@ public:
 
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+    void updateInputLevelMeter (const juce::AudioBuffer<float>& buffer);
     void updateOutputLevelMeter (const juce::AudioBuffer<float>& buffer);
     void seedFactoryPresetsIfMissing();
 
@@ -255,6 +257,7 @@ private:
 
     std::atomic<float> currentGainReductionDb { 0.0f };
     std::array<std::atomic<float>, numBands> bandGainReductionDb {};
+    std::atomic<float> inputPeakLinear { 0.0f };
     std::atomic<float> outputPeakLinear { 0.0f };
     std::atomic<int> clipHoldBlocksRemaining { 0 };
 

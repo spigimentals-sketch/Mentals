@@ -92,7 +92,14 @@ private:
 
     MentalsMasteringMeterAudioProcessor& processor;
 
-    juce::ImageComponent logoImage;
+    MentalsUI::HardwareLookAndFeel hardwareLookAndFeel;
+
+    // Set in resized(), read back in paint() so the metal-panel texture,
+    // corner screws, and rack ears are drawn over exactly the same area the
+    // knobs sit in.
+    juce::Rectangle<int> lastPanelBounds;
+
+    MentalsUI::MetallicLogoComponent logoImage;
     juce::Label productNameLabel;
     juce::Label targetLabel;
     juce::ComboBox targetSelector;

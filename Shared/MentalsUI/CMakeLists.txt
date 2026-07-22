@@ -12,7 +12,10 @@ add_library(MentalsUI STATIC
     LevelMeterComponent.cpp
     GainReductionMeterComponent.cpp
     VuMeterComponent.cpp
-    MentalsLookAndFeel.cpp)
+    MentalsLookAndFeel.cpp
+    HardwareLookAndFeel.cpp
+    AnalogVUMeterComponent.cpp
+    MetallicLogoComponent.cpp)
 
 target_include_directories(MentalsUI PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 

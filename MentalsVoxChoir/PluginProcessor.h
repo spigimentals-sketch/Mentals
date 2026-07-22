@@ -27,6 +27,20 @@
 // stereo spread, so unlike this project's other effects, input and output
 // channel counts don't have to match.
 //
+// Softness (applied last, to the final stereo output, dry+wet together --
+// see applySoftness() in PluginProcessor.cpp) is what actually rounds off
+// a "hard"/edgy result: a high-shelf de-harshening filter tames excess
+// top-end energy, and a fast/slow envelope comparison tames consonant and
+// pick/attack transients specifically (the part of "hardness" a static EQ
+// shelf alone can't reach), both scaling together with one knob.
+//
+// Low Cut is a high-pass filter on the WET ensemble only, applied before
+// the dry/wet blend -- up to 32 detuned copies of the same source stack
+// their low-mid energy on top of each other and each other's, which reads
+// as mud/thickness rather than the dry source's own (untouched) low end.
+// Sweeping it up doesn't touch the dry signal at all, only how much low
+// end the ensemble itself is allowed to contribute.
+//
 // Runs well after a pitch-correction stage in a chain (e.g. Mentals
 // Suite): correcting pitch first gives every voice a clean, in-tune
 // reference to detune/vibrato around, rather than compounding onto
@@ -84,6 +98,8 @@ public:
     juce::AudioParameterFloat*  timingParam   = nullptr;
     juce::AudioParameterFloat*  spreadParam   = nullptr;
     juce::AudioParameterFloat*  mixParam      = nullptr;
+    juce::AudioParameterFloat*  softnessParam = nullptr;
+    juce::AudioParameterFloat*  lowCutParam   = nullptr;
 
     static constexpr int maxVoices = 32;
     static const int voiceCountChoices[4];
@@ -96,8 +112,42 @@ private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     void seedFactoryPresetsIfMissing();
     void updateOutputLevelMeter (const juce::AudioBuffer<float>& buffer);
+    void applySoftness (float* left, float* right, int numSamples, float softnessAmount) noexcept;
 
     double currentSampleRate = 44100.0;
+
+    //==========================================================================
+    // Low Cut: a plain Butterworth high-pass on the wet ensemble sum
+    // (outL/outR), recomputed only when the frequency actually changes.
+    //==========================================================================
+    static constexpr float lowCutQ = 0.70710678f;
+    std::array<juce::dsp::IIR::Filter<float>, 2> lowCutFilter;
+    float lastLowCutFreqHz = -1.0f;
+
+    //==========================================================================
+    // Softness's de-harsh shelf: fixed frequency/Q, only the gain (0 at
+    // Softness=0, up to softnessMaxShelfCutDb at 100%) changes, so recomputing
+    // every block (not per-sample) is plenty responsive to knob moves.
+    //==========================================================================
+    static constexpr float softnessShelfFreqHz    = 3000.0f;
+    static constexpr float softnessShelfQ         = 0.70710678f;
+    static constexpr float softnessMaxShelfCutDb  = -12.0f;
+    std::array<juce::dsp::IIR::Filter<float>, 2> softnessShelf;
+    float lastSoftnessShelfGainDb = 1.0f; // deliberately not a valid gain, forces the first updateIfNeeded() to set coefficients
+
+    // Softness's transient tamer: compares a fast envelope (catches
+    // consonants/pick attacks) against a slow one (the sustained body) and
+    // pulls down just the excess, so it can round off "bite" without
+    // dulling sustained tone the way lowering Mix or the shelf alone would.
+    static constexpr float softnessFastAttackSeconds  = 0.0005f;
+    static constexpr float softnessFastReleaseSeconds = 0.015f;
+    static constexpr float softnessSlowAttackSeconds  = 0.030f;
+    static constexpr float softnessSlowReleaseSeconds = 0.150f;
+    static constexpr float softnessMaxTransientCut    = 0.85f; // never fully guts a transient, even at Softness=100%
+    struct SoftnessEnvelopes { float fast = 0.0f, slow = 0.0f; };
+    std::array<SoftnessEnvelopes, 2> softnessEnvelopes;
+    float softnessFastAttackCoeff = 0.0f, softnessFastReleaseCoeff = 0.0f;
+    float softnessSlowAttackCoeff = 0.0f, softnessSlowReleaseCoeff = 0.0f;
 
     struct Voice
     {
