@@ -108,6 +108,13 @@ public:
     juce::AudioParameterBool*   stereoUnlinkParam = nullptr;
     juce::AudioParameterFloat*  mixParam          = nullptr;
 
+    // When off, the final output is summed to mono (both channels made
+    // identical) -- a mono-compatibility check/forcing switch, same control
+    // every Mentals plugin now has. Distinct from Stereo Unlink, which
+    // controls whether the two channels' detectors are independent, not
+    // whether the final output is collapsed to mono.
+    juce::AudioParameterBool* stereoParam = nullptr;
+
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     void seedFactoryPresetsIfMissing();

@@ -84,6 +84,10 @@ MentalsLimiterAudioProcessorEditor::MentalsLimiterAudioProcessorEditor (MentalsL
     addAndMakeVisible (presetSaveButton);
     presetSaveButton.addListener (this);
 
+    stereoToggle.setColour (juce::ToggleButton::textColourId, MentalsUI::Colours::white);
+    stereoToggle.setColour (juce::ToggleButton::tickColourId, MentalsUI::Colours::white);
+    addAndMakeVisible (stereoToggle);
+
     addAndMakeVisible (transferCurve);
     addAndMakeVisible (splitter);
 
@@ -116,6 +120,8 @@ MentalsLimiterAudioProcessorEditor::MentalsLimiterAudioProcessorEditor (MentalsL
         processor.apvts, "mix", mixSlider.slider);
     truePeakAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         processor.apvts, "truePeak", truePeakToggle);
+    stereoAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        processor.apvts, "stereo", stereoToggle);
 
     setResizable (true, true);
     setResizeLimits (620, 460, 1300, 900);
@@ -236,6 +242,8 @@ void MentalsLimiterAudioProcessorEditor::resized()
         presetSelector.setBounds (t.removeFromRight (160));
         t.removeFromRight (12);
         truePeakToggle.setBounds (t.removeFromRight (90));
+        t.removeFromRight (8);
+        stereoToggle.setBounds (t.removeFromRight (80));
     }
 
     auto panelArea    = area.removeFromBottom (panelHeight);

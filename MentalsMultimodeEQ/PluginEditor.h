@@ -366,6 +366,11 @@ private:
     juce::ToggleButton autoGainToggle { "Auto Gain" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> autoGainAttachment;
 
+    // When off, the final output is summed to mono -- a mono-compatibility
+    // check/forcing switch, same control every Mentals plugin now has.
+    juce::ToggleButton stereoToggle { "Stereo" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> stereoAttachment;
+
     juce::Label phaseModeLabel;
     juce::ComboBox phaseModeSelector;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> phaseModeAttachment;

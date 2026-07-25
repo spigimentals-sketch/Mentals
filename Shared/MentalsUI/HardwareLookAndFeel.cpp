@@ -108,12 +108,17 @@ namespace MentalsUI
         g.drawEllipse (bounds.reduced (radius * 0.12f), 1.0f);
 
         // Pointer: the one spot of brand colour on an otherwise neutral-chrome
-        // knob -- a thin electric-blue indicator line, the way some hardware
-        // units use a single accent colour for their pointers/legends against
-        // an otherwise all-metal panel.
+        // knob -- a thin indicator line, the way some hardware units use a
+        // single accent colour for their pointers/legends against an
+        // otherwise all-metal panel. Reads the slider's OWN thumbColourId
+        // (every plugin's knobs set this to electricBlue via
+        // LabelledSlider::addToParent(), so this is electricBlue everywhere
+        // by default) rather than hardcoding it, so a plugin that
+        // deliberately colour-codes its knobs per section (e.g. Channel
+        // Strip) actually shows those colours.
         const auto pointerStart = centre.getPointOnCircumference (radius * 0.18f, angle);
         const auto pointerEnd   = centre.getPointOnCircumference (radius * 0.88f, angle);
-        g.setColour (Colours::electricBlue);
+        g.setColour (slider.findColour (juce::Slider::thumbColourId));
         g.drawLine ({ pointerStart, pointerEnd }, 2.6f);
     }
 

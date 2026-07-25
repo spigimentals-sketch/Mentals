@@ -64,6 +64,12 @@ public:
     juce::AudioParameterFloat* lowCutParam      = nullptr;
     juce::AudioParameterFloat* highCutParam     = nullptr;
 
+    // When off, the final output is summed to mono (both channels made
+    // identical) regardless of Ping-Pong or anything else upstream -- a
+    // mono-compatibility check/forcing switch, same control every Mentals
+    // plugin now has.
+    juce::AudioParameterBool* stereoParam = nullptr;
+
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     void seedFactoryPresetsIfMissing();

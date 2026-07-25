@@ -109,10 +109,12 @@ private:
     juce::Label productNameLabel;
     juce::TextButton phaseAlignButton { "Phase Align" };
     juce::TextButton aiAssistButton   { "AI Placement" };
+    juce::ToggleButton stereoToggle { "Stereo" };
     juce::ComboBox presetSelector;
     juce::TextButton presetSaveButton { "Save" };
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> phaseAlignAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> stereoAttachment;
 
     StereoAnalyzerComponent analyzer;
     MentalsUI::SplitterBar splitter;

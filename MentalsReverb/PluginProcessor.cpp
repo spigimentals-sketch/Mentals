@@ -50,6 +50,7 @@ MentalsReverbAudioProcessor::MentalsReverbAudioProcessor()
     duckingReleaseMsParam = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("duckingReleaseMs"));
     tempoSyncParam   = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("tempoSync"));
     preDelayDivisionParam = dynamic_cast<juce::AudioParameterChoice*> (apvts.getParameter ("preDelayDivision"));
+    stereoParam      = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("stereo"));
 
     seedFactoryPresetsIfMissing();
 }
@@ -137,6 +138,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout MentalsReverbAudioProcessor:
 
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         "preDelayDivision", "Pre-Delay Division", preDelayDivisionNames, 4)); // default "1/8"
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "stereo", "Stereo", true));
 
     return { params.begin(), params.end() };
 }
@@ -464,6 +468,16 @@ void MentalsReverbAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer
         const auto* dry = dryCopyBuffer.getReadPointer (ch);
         for (int n = 0; n < numSamples; ++n)
             data[n] = dry[n] * (1.0f - mix) + data[n] * mix;
+    }
+
+    if (! stereoParam->get() && numChannels > 1)
+    {
+        for (int n = 0; n < numSamples; ++n)
+        {
+            const float avg = 0.5f * (buffer.getReadPointer (0)[n] + buffer.getReadPointer (1)[n]);
+            buffer.getWritePointer (0)[n] = avg;
+            buffer.getWritePointer (1)[n] = avg;
+        }
     }
 
     updateOutputLevelMeter (buffer);

@@ -98,14 +98,6 @@ public:
     float getCompGainReductionDb() const noexcept { return currentCompGainReductionDb.load(); }
     float getGateGainReductionDb() const noexcept { return currentGateGainReductionDb.load(); }
 
-    // Shared by processBlock() and the editor's EQ curve display, so the
-    // curve can never show a shape that disagrees with what's actually
-    // applied. shape: 0 = Bell, 1 = Shelf (low), 2 = Shelf (high), matching
-    // how each band's own fixed role calls it.
-    enum class BandShape { Bell, LowShelf, HighShelf, HighPass, LowPass };
-    static double getMagnitudeForFrequency (BandShape shape, double freqHz, double bandFreq, double q,
-                                             double gainDb, double sampleRate) noexcept;
-
     juce::AudioParameterFloat* hpfFreqParam   = nullptr;
     juce::AudioParameterFloat* lpfFreqParam   = nullptr;
     juce::AudioParameterBool*  filterSplitParam = nullptr;
@@ -144,6 +136,11 @@ public:
 
     juce::AudioParameterBool*  eqInParam     = nullptr;
     juce::AudioParameterFloat* outputGainParam = nullptr;
+
+    // When off, the final output is summed to mono (both channels made
+    // identical) -- a mono-compatibility check/forcing switch, same control
+    // every Mentals plugin now has.
+    juce::AudioParameterBool* stereoParam = nullptr;
 
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();

@@ -78,6 +78,10 @@ MentalsMaximizerAudioProcessorEditor::MentalsMaximizerAudioProcessorEditor (Ment
     addAndMakeVisible (presetSaveButton);
     presetSaveButton.addListener (this);
 
+    stereoToggle.setColour (juce::ToggleButton::textColourId, MentalsUI::Colours::white);
+    stereoToggle.setColour (juce::ToggleButton::tickColourId, MentalsUI::Colours::white);
+    addAndMakeVisible (stereoToggle);
+
     addAndMakeVisible (transferCurve);
     addAndMakeVisible (splitter);
 
@@ -139,6 +143,8 @@ MentalsMaximizerAudioProcessorEditor::MentalsMaximizerAudioProcessorEditor (Ment
         processor.apvts, "algorithm", algorithmSelector);
     stereoUnlinkAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         processor.apvts, "stereoUnlink", stereoUnlinkToggle);
+    stereoAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        processor.apvts, "stereo", stereoToggle);
 
     setResizable (true, true);
     setResizeLimits (720, 520, 1300, 900);
@@ -267,6 +273,8 @@ void MentalsMaximizerAudioProcessorEditor::resized()
         presetSaveButton.setBounds (t.removeFromRight (60));
         t.removeFromRight (8);
         presetSelector.setBounds (t.removeFromRight (160));
+        t.removeFromRight (12);
+        stereoToggle.setBounds (t.removeFromRight (80));
     }
 
     auto panelArea    = area.removeFromBottom (panelHeight);

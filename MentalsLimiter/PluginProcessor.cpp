@@ -13,6 +13,7 @@ MentalsLimiterAudioProcessor::MentalsLimiterAudioProcessor()
     releaseParam   = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("release"));
     mixParam       = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("mix"));
     truePeakParam  = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("truePeak"));
+    stereoParam    = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("stereo"));
 
     seedFactoryPresetsIfMissing();
 }
@@ -44,6 +45,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout MentalsLimiterAudioProcessor
 
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "truePeak", "True Peak", true));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "stereo", "Stereo", true));
 
     return { params.begin(), params.end() };
 }
@@ -189,6 +193,17 @@ void MentalsLimiterAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     }
 
     currentGainReductionDb.store (blockMinGainReductionDb);
+
+    if (! stereoParam->get() && numChannels > 1)
+    {
+        for (int n = 0; n < numSamples; ++n)
+        {
+            const float avg = 0.5f * (buffer.getReadPointer (0)[n] + buffer.getReadPointer (1)[n]);
+            buffer.getWritePointer (0)[n] = avg;
+            buffer.getWritePointer (1)[n] = avg;
+        }
+    }
+
     updateOutputLevelMeter (buffer);
 }
 

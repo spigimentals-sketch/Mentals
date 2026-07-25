@@ -14,6 +14,7 @@ MentalsDelayAudioProcessor::MentalsDelayAudioProcessor()
     pingPongParam    = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("pingPong"));
     lowCutParam      = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("lowCut"));
     highCutParam     = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("highCut"));
+    stereoParam      = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("stereo"));
 
     seedFactoryPresetsIfMissing();
 }
@@ -50,6 +51,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout MentalsDelayAudioProcessor::
         "highCut", "Feedback High Cut",
         juce::NormalisableRange<float> (1000.0f, 20000.0f, 0.01f, 0.3f), 8000.0f,
         juce::AudioParameterFloatAttributes().withLabel ("Hz")));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "stereo", "Stereo", true));
 
     return { params.begin(), params.end() };
 }
@@ -164,6 +168,16 @@ void MentalsDelayAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
             const float wet = delayedRead[(size_t) ch];
             buffer.getWritePointer (ch)[n] = dry[(size_t) ch] * (1.0f - mix) + wet * mix;
+        }
+    }
+
+    if (! stereoParam->get() && numChannels > 1)
+    {
+        for (int n = 0; n < numSamples; ++n)
+        {
+            const float avg = 0.5f * (buffer.getReadPointer (0)[n] + buffer.getReadPointer (1)[n]);
+            buffer.getWritePointer (0)[n] = avg;
+            buffer.getWritePointer (1)[n] = avg;
         }
     }
 

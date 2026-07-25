@@ -121,6 +121,13 @@ public:
     juce::AudioParameterBool*  phaseAlignParam     = nullptr;
     juce::AudioParameterFloat* mixParam            = nullptr;
 
+    // When off, the final output is summed to mono (both channels made
+    // identical) regardless of Width/Rotation/anything else upstream -- a
+    // mono-compatibility check/forcing switch, same control every Mentals
+    // plugin now has. Distinct from Width=0: this always collapses fully to
+    // mono no matter what Width/Rotation/per-band width are dialled in.
+    juce::AudioParameterBool* stereoParam = nullptr;
+
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     void updateOutputLevelMeter (const juce::AudioBuffer<float>& buffer);

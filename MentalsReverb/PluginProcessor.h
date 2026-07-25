@@ -143,6 +143,12 @@ public:
     juce::AudioParameterBool*  tempoSyncParam    = nullptr;
     juce::AudioParameterChoice* preDelayDivisionParam = nullptr;
 
+    // When off, the final output is summed to mono (both channels made
+    // identical) regardless of Width or anything else upstream -- a mono-
+    // compatibility check/forcing switch, same control every Mentals plugin
+    // now has.
+    juce::AudioParameterBool* stereoParam = nullptr;
+
     // Note divisions offered for tempo-synced Pre-Delay, in quarter-note
     // (beat) units -- e.g. a 1/16 note is 0.25 of a beat, a 1/8 triplet is
     // 1/3 of a 1/8 note (0.5 beats * 2/3). Shared between the processor

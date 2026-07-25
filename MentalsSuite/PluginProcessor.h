@@ -24,6 +24,8 @@
 #include "../MentalsMasteringMeter/PluginProcessor.h"
 #include "../MentalsChannelStrip/PluginProcessor.h"
 #include "../MentalsMaximizer/PluginProcessor.h"
+#include "../MentalsDoubler/PluginProcessor.h"
+#include "../MentalsImager/PluginProcessor.h"
 #include "MasterAssistant.h"
 
 #include <memory>
@@ -110,6 +112,8 @@ public:
         moduleMasteringMeter,
         moduleChannelStrip,
         moduleMaximizer,
+        moduleDoubler,
+        moduleImager,
         numModuleTypes
     };
 

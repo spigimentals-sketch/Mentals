@@ -69,10 +69,12 @@ private:
     MentalsUI::MetallicLogoComponent logoImage;
     juce::Label productNameLabel;
     juce::TextButton truePeakToggle { "True Peak" };
+    juce::ToggleButton stereoToggle { "Stereo" };
     juce::ComboBox presetSelector;
     juce::TextButton presetSaveButton { "Save" };
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> truePeakAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> stereoAttachment;
 
     LimiterTransferCurveComponent transferCurve;
     MentalsUI::SplitterBar splitter;

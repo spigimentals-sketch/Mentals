@@ -51,6 +51,8 @@ target_link_libraries(MentalsSuite
         MentalsMasteringMeterCore
         MentalsChannelStripCore
         MentalsMaximizerCore
+        MentalsDoublerCore
+        MentalsImagerCore
         juce::juce_audio_utils
         juce::juce_dsp
     PUBLIC

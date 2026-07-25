@@ -18,6 +18,7 @@ MentalsVoxChoirAudioProcessor::MentalsVoxChoirAudioProcessor()
     mixParam     = dynamic_cast<juce::AudioParameterFloat*>  (apvts.getParameter ("mix"));
     softnessParam = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("softness"));
     lowCutParam   = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("lowCut"));
+    stereoParam   = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("stereo"));
 
     seedFactoryPresetsIfMissing();
 }
@@ -64,6 +65,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout MentalsVoxChoirAudioProcesso
         "lowCut", "Low Cut",
         juce::NormalisableRange<float> (20.0f, 500.0f, 0.1f, 0.35f), 20.0f, // 20Hz default is effectively off
         juce::AudioParameterFloatAttributes().withLabel ("Hz")));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "stereo", "Stereo", true));
 
     return { params.begin(), params.end() };
 }
@@ -215,6 +219,17 @@ void MentalsVoxChoirAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
     }
 
     applySoftness (left, right, numSamples, softnessParam->get() * 0.01f);
+
+    if (! stereoParam->get() && buffer.getNumChannels() > 1)
+    {
+        for (int n = 0; n < numSamples; ++n)
+        {
+            const float avg = 0.5f * (left[n] + right[n]);
+            left[n] = avg;
+            right[n] = avg;
+        }
+    }
+
     updateOutputLevelMeter (buffer);
 }
 

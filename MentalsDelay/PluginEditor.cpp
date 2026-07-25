@@ -87,6 +87,10 @@ MentalsDelayAudioProcessorEditor::MentalsDelayAudioProcessorEditor (MentalsDelay
     addAndMakeVisible (presetSaveButton);
     presetSaveButton.addListener (this);
 
+    stereoToggle.setColour (juce::ToggleButton::textColourId, MentalsUI::Colours::white);
+    stereoToggle.setColour (juce::ToggleButton::tickColourId, MentalsUI::Colours::white);
+    addAndMakeVisible (stereoToggle);
+
     addAndMakeVisible (echoPattern);
     addAndMakeVisible (splitter);
 
@@ -119,6 +123,8 @@ MentalsDelayAudioProcessorEditor::MentalsDelayAudioProcessorEditor (MentalsDelay
         processor.apvts, "highCut", highCutSlider.slider);
     pingPongAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         processor.apvts, "pingPong", pingPongToggle);
+    stereoAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        processor.apvts, "stereo", stereoToggle);
 
     setResizable (true, true);
     setResizeLimits (560, 420, 1200, 900);
@@ -237,6 +243,8 @@ void MentalsDelayAudioProcessorEditor::resized()
         presetSelector.setBounds (t.removeFromLeft (160));
         t.removeFromLeft (8);
         presetSaveButton.setBounds (t.removeFromLeft (60));
+        t.removeFromLeft (12);
+        stereoToggle.setBounds (t.removeFromLeft (80));
     }
 
     // Controls are bottom-anchored with a fixed height, and the echo-pattern

@@ -1,76 +1,154 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
-//==============================================================================
-// ChannelStripCurveComponent
-//==============================================================================
-void ChannelStripCurveComponent::paint (juce::Graphics& g)
+namespace
 {
-    g.fillAll (MentalsUI::Colours::slateGrayDark);
-
-    auto bounds = getLocalBounds().toFloat().reduced (10.0f);
-    constexpr float minDb = -18.0f, maxDb = 18.0f;
-    constexpr float minFreq = 20.0f, maxFreq = 20000.0f;
-
-    auto xForFreq = [&] (float f) { return bounds.getX() + std::log10 (f / minFreq) / std::log10 (maxFreq / minFreq) * bounds.getWidth(); };
-    auto yForDb   = [&] (float db) { return bounds.getBottom() - (db - minDb) / (maxDb - minDb) * bounds.getHeight(); };
-
-    g.setColour (juce::Colours::white.withAlpha (0.12f));
-    for (float f : { 100.0f, 1000.0f, 10000.0f })
-        g.drawVerticalLine ((int) xForFreq (f), bounds.getY(), bounds.getBottom());
-    g.drawHorizontalLine ((int) yForDb (0.0f), bounds.getX(), bounds.getRight());
-
-    using Shape = MentalsChannelStripAudioProcessor::BandShape;
-    const double sampleRate = 44100.0; // curve is sample-rate-independent enough for display purposes
-
-    const bool lfBell = processor.lfBellParam->get();
-    const bool hfBell = processor.hfBellParam->get();
-    const float lfFreq = processor.lfFreqParam->get(), lfGain = processor.lfGainParam->get();
-    const float lmfFreq = processor.lmfFreqParam->get(), lmfGain = processor.lmfGainParam->get(), lmfQ = processor.lmfQParam->get();
-    const float hmfFreq = processor.hmfFreqParam->get(), hmfGain = processor.hmfGainParam->get(), hmfQ = processor.hmfQParam->get();
-    const float hfFreq = processor.hfFreqParam->get(), hfGain = processor.hfGainParam->get();
-    const bool eqIn = processor.eqInParam->get();
-
-    juce::Path path;
-    bool started = false;
-    constexpr int numPoints = 200;
-    for (int i = 0; i <= numPoints; ++i)
+    // Renders one bulb with a glossy, 3D "sphere" shading -- a radial
+    // gradient with the highlight offset up-left (a fixed, plausible light
+    // source) fading through the zone colour to a darker rim, plus a small
+    // specular highlight dot, rather than a flat coloured disc.
+    void drawBulb3D (juce::Graphics& g, juce::Point<float> centre, float diameter, juce::Colour zoneColour, bool lit)
     {
-        const float t = (float) i / (float) numPoints;
-        const float freq = minFreq * std::pow (maxFreq / minFreq, t);
-
-        float totalDb = 0.0f;
-        if (eqIn)
+        if (lit)
         {
-            const double lfMag  = MentalsChannelStripAudioProcessor::getMagnitudeForFrequency (
-                lfBell ? Shape::Bell : Shape::LowShelf, freq, lfFreq, lfBell ? 1.0f : 0.7071f, lfGain, sampleRate);
-            const double lmfMag = MentalsChannelStripAudioProcessor::getMagnitudeForFrequency (Shape::Bell, freq, lmfFreq, lmfQ, lmfGain, sampleRate);
-            const double hmfMag = MentalsChannelStripAudioProcessor::getMagnitudeForFrequency (Shape::Bell, freq, hmfFreq, hmfQ, hmfGain, sampleRate);
-            const double hfMag  = MentalsChannelStripAudioProcessor::getMagnitudeForFrequency (
-                hfBell ? Shape::Bell : Shape::HighShelf, freq, hfFreq, hfBell ? 1.0f : 0.7071f, hfGain, sampleRate);
-
-            totalDb = (float) juce::Decibels::gainToDecibels (lfMag * lmfMag * hmfMag * hfMag, -100.0);
+            g.setColour (zoneColour.withAlpha (0.32f));
+            g.fillEllipse (juce::Rectangle<float> (diameter * 1.7f, diameter * 1.7f).withCentre (centre));
         }
 
-        const float x = xForFreq (freq);
-        const float y = yForDb (juce::jlimit (minDb, maxDb, totalDb));
+        const juce::Colour base      = lit ? zoneColour : zoneColour.withAlpha (0.16f);
+        const juce::Colour highlight = lit ? base.brighter (1.3f) : base.brighter (0.4f);
+        const juce::Colour shadow    = lit ? base.darker (0.75f)  : base.darker (0.3f);
 
-        if (! started) { path.startNewSubPath (x, y); started = true; }
-        else            path.lineTo (x, y);
+        auto bulbRect = juce::Rectangle<float> (diameter, diameter).withCentre (centre);
+        juce::ColourGradient sphere (highlight, centre.x - diameter * 0.3f, centre.y - diameter * 0.34f,
+                                      shadow,    centre.x + diameter * 0.55f, centre.y + diameter * 0.55f, true);
+        sphere.addColour (0.55, base);
+        g.setGradientFill (sphere);
+        g.fillEllipse (bulbRect);
+
+        g.setColour (juce::Colours::black.withAlpha (0.45f));
+        g.drawEllipse (bulbRect, 1.0f);
+
+        if (lit)
+        {
+            g.setColour (juce::Colours::white.withAlpha (0.6f));
+            g.fillEllipse (juce::Rectangle<float> (diameter * 0.24f, diameter * 0.24f)
+                                .withCentre ({ centre.x - diameter * 0.22f, centre.y - diameter * 0.26f }));
+        }
+    }
+}
+
+//==============================================================================
+// BulbGrMeterComponent
+//==============================================================================
+void BulbGrMeterComponent::paint (juce::Graphics& g)
+{
+    auto bounds = getLocalBounds().toFloat();
+
+    g.setColour (MentalsUI::Colours::charcoalBlack);
+    g.fillRoundedRectangle (bounds, 5.0f);
+    bounds.reduce (4.0f, 4.0f);
+
+    constexpr float maxReductionDb = 24.0f;
+    const float amount = juce::jlimit (0.0f, 1.0f, -displayedGainReductionDb / maxReductionDb);
+
+    constexpr int numBulbs = 8; // fewer, bigger bulbs than before
+    const float cellHeight = bounds.getHeight() / (float) numBulbs;
+    const float bulbDiameter = juce::jmin (bounds.getWidth(), cellHeight * 0.86f);
+    const int numLit = (int) std::round (amount * (float) numBulbs);
+
+    for (int i = 0; i < numBulbs; ++i)
+    {
+        // Bulb 0 is at the TOP (least reduction); fills downward as more
+        // reduction is applied, same convention as the shared segmented meter.
+        const float cy = bounds.getY() + ((float) i + 0.5f) * cellHeight;
+        const float cx = bounds.getCentreX();
+        const bool lit = i < numLit;
+
+        // Zone colour by position: shallow reduction reads green, moderate
+        // amber, heavy (bottom of the column) red -- a standard GR-meter
+        // convention.
+        const float posFrac = (float) i / (float) (numBulbs - 1);
+        juce::Colour zoneColour = MentalsUI::Colours::emeraldGreen;
+        if (posFrac >= 0.66f)      zoneColour = MentalsUI::Colours::crimsonRed;
+        else if (posFrac >= 0.33f) zoneColour = MentalsUI::Colours::amberOrange;
+
+        drawBulb3D (g, { cx, cy }, bulbDiameter, zoneColour, lit);
     }
 
-    g.setColour (eqIn ? MentalsUI::Colours::electricBlue : MentalsUI::Colours::slateGray);
-    g.strokePath (path, juce::PathStrokeType (2.0f));
+    g.setColour (MentalsUI::Colours::slateGray);
+    g.drawRoundedRectangle (getLocalBounds().toFloat(), 5.0f, 1.0f);
+}
+
+//==============================================================================
+// BulbLevelMeterComponent
+//==============================================================================
+void BulbLevelMeterComponent::paint (juce::Graphics& g)
+{
+    auto bounds = getLocalBounds().toFloat();
+
+    auto clipLedArea = bounds.removeFromTop (juce::jmin (18.0f, bounds.getHeight() * 0.1f)).reduced (2.0f);
+    bounds.removeFromTop (3.0f);
+
+    {
+        const auto diameter = juce::jmin (clipLedArea.getWidth(), clipLedArea.getHeight());
+        drawBulb3D (g, clipLedArea.getCentre(), diameter, MentalsUI::Colours::crimsonRed, clipping);
+    }
+
+    g.setColour (MentalsUI::Colours::charcoalBlack);
+    g.fillRoundedRectangle (bounds, 5.0f);
+    bounds.reduce (4.0f, 4.0f);
+
+    constexpr float minDb = -48.0f, maxDb = 6.0f;
+    constexpr float safeCeilingDb = -6.0f;
+    constexpr float cautionCeilingDb = 0.0f;
+
+    constexpr int numBulbs = 11; // fewer, bigger bulbs than before
+    const float cellHeight = bounds.getHeight() / (float) numBulbs;
+    const float bulbDiameter = juce::jmin (bounds.getWidth(), cellHeight * 0.86f);
+
+    for (int i = 0; i < numBulbs; ++i)
+    {
+        // Bulb 0 is at the BOTTOM of the column, filling upward with level --
+        // the classic bargraph convention.
+        const float cy = bounds.getBottom() - ((float) i + 0.5f) * cellHeight;
+        const float cx = bounds.getCentreX();
+
+        const float segBottomDb = minDb + ((float) i / (float) numBulbs) * (maxDb - minDb);
+        const bool lit = displayedPeakDb >= segBottomDb;
+
+        juce::Colour zoneColour = MentalsUI::Colours::emeraldGreen;
+        if (segBottomDb >= cautionCeilingDb)  zoneColour = MentalsUI::Colours::crimsonRed;
+        else if (segBottomDb >= safeCeilingDb) zoneColour = MentalsUI::Colours::amberOrange;
+
+        drawBulb3D (g, { cx, cy }, bulbDiameter, zoneColour, lit);
+    }
+
+    g.setColour (MentalsUI::Colours::slateGray);
+    g.drawRoundedRectangle (getLocalBounds().toFloat().withTrimmedTop (clipLedArea.getHeight() + 5.0f), 5.0f, 1.0f);
+}
+
+namespace
+{
+    // Colours a knob's fill/thumb to match this strip's section colour
+    // coding: green for Filters, blue for every EQ band, orange for
+    // Dynamics, grey for Input/Output -- one colour per SECTION (not one
+    // per band) is the convention here.
+    void colourKnob (MentalsUI::LabelledSlider& knob, juce::Colour colour)
+    {
+        knob.slider.setColour (juce::Slider::rotarySliderFillColourId, colour);
+        knob.slider.setColour (juce::Slider::thumbColourId, colour);
+    }
 }
 
 //==============================================================================
 // MentalsChannelStripAudioProcessorEditor
 //==============================================================================
 MentalsChannelStripAudioProcessorEditor::MentalsChannelStripAudioProcessorEditor (MentalsChannelStripAudioProcessor& p)
-    : AudioProcessorEditor (&p), processor (p), curve (p),
-      compGrMeter ([&p] { return p.getCompGainReductionDb(); }, true),
-      gateGrMeter ([&p] { return p.getGateGainReductionDb(); }, true),
-      outputMeter ([&p] { return p.getOutputPeakDb(); })
+    : AudioProcessorEditor (&p), processor (p),
+      compGrMeter ([&p] { return p.getCompGainReductionDb(); }),
+      gateGrMeter ([&p] { return p.getGateGainReductionDb(); }),
+      outputMeter ([&p] { return p.getOutputPeakDb(); }, [&p] { return p.isOutputClipping(); })
 {
     setLookAndFeel (&hardwareLookAndFeel);
 
@@ -91,21 +169,28 @@ MentalsChannelStripAudioProcessorEditor::MentalsChannelStripAudioProcessorEditor
     presetSaveButton.addListener (this);
     addAndMakeVisible (presetSaveButton);
 
-    addAndMakeVisible (curve);
+    stereoToggle.setColour (juce::ToggleButton::textColourId, MentalsUI::Colours::white);
+    stereoToggle.setColour (juce::ToggleButton::tickColourId, MentalsUI::Colours::white);
+    addAndMakeVisible (stereoToggle);
+
     addAndMakeVisible (splitter);
 
     // ---- Section labels ---------------------------------------------------------
-    for (auto* l : { &filtersLabel, &compLabel, &gateLabel, &lfLabel, &lmfLabel, &hmfLabel, &hfLabel, &outputLabel })
+    for (auto* l : { &filtersLabel, &eqLabel, &hfLabel, &hmfLabel, &lmfLabel, &lfLabel,
+                      &dynamicsLabel, &compLabel, &gateLabel, &outputLabel })
     {
         l->setColour (juce::Label::textColourId, MentalsUI::Colours::goldenYellow);
         l->setFont (juce::Font (juce::FontOptions (13.0f).withStyle ("Bold")));
         l->setJustificationType (juce::Justification::centredLeft);
         addAndMakeVisible (*l);
     }
+    dynamicsLabel.setFont (juce::Font (juce::FontOptions (14.0f).withStyle ("Bold")));
 
-    // ---- Filters ------------------------------------------------------------------
+    // ---- Filters (green) ------------------------------------------------------------
     hpfFreqSlider.addToParent ("HPF", *this);
     lpfFreqSlider.addToParent ("LPF", *this);
+    colourKnob (hpfFreqSlider, MentalsUI::Colours::emeraldGreen);
+    colourKnob (lpfFreqSlider, MentalsUI::Colours::emeraldGreen);
     for (auto* b : { &filterSplitToggle, &filtersInToggle })
     {
         b->setClickingTogglesState (true);
@@ -114,40 +199,30 @@ MentalsChannelStripAudioProcessorEditor::MentalsChannelStripAudioProcessorEditor
         addAndMakeVisible (*b);
     }
 
-    // ---- Dynamics -------------------------------------------------------------------
-    compThresholdSlider.addToParent ("Thresh", *this);
-    compRatioSlider.addToParent     ("Ratio",  *this);
-    compAttackSlider.addToParent    ("Attack", *this);
-    compReleaseSlider.addToParent   ("Release",*this);
-    compMakeupSlider.addToParent    ("Makeup", *this);
-    addAndMakeVisible (compGrMeter);
+    // ---- EQ -- every band is the SAME blue (see colourKnob() above) ----------------
+    hfFreqSlider.addToParent ("Freq", *this);
+    hfGainSlider.addToParent ("Gain", *this);
+    colourKnob (hfFreqSlider, MentalsUI::Colours::electricBlue);
+    colourKnob (hfGainSlider, MentalsUI::Colours::electricBlue);
 
-    gateThresholdSlider.addToParent ("Thresh", *this);
-    gateRatioSlider.addToParent     ("Ratio",  *this);
-    gateAttackSlider.addToParent    ("Attack", *this);
-    gateReleaseSlider.addToParent   ("Release",*this);
-    gateRangeSlider.addToParent     ("Range",  *this);
-    addAndMakeVisible (gateGrMeter);
-
-    for (auto* b : { &dynamicsInToggle, &dynamicsBeforeEqToggle })
-    {
-        b->setClickingTogglesState (true);
-        b->setColour (juce::TextButton::buttonColourId,   MentalsUI::Colours::slateGrayDark);
-        b->setColour (juce::TextButton::buttonOnColourId, MentalsUI::Colours::electricBlue);
-        addAndMakeVisible (*b);
-    }
-
-    // ---- EQ ---------------------------------------------------------------------------
-    lfFreqSlider.addToParent ("Freq", *this);
-    lfGainSlider.addToParent ("Gain", *this);
-    lmfFreqSlider.addToParent ("Freq", *this);
-    lmfGainSlider.addToParent ("Gain", *this);
-    lmfQSlider.addToParent    ("Q",    *this);
     hmfFreqSlider.addToParent ("Freq", *this);
     hmfGainSlider.addToParent ("Gain", *this);
     hmfQSlider.addToParent    ("Q",    *this);
-    hfFreqSlider.addToParent ("Freq", *this);
-    hfGainSlider.addToParent ("Gain", *this);
+    colourKnob (hmfFreqSlider, MentalsUI::Colours::electricBlue);
+    colourKnob (hmfGainSlider, MentalsUI::Colours::electricBlue);
+    colourKnob (hmfQSlider, MentalsUI::Colours::electricBlue);
+
+    lmfFreqSlider.addToParent ("Freq", *this);
+    lmfGainSlider.addToParent ("Gain", *this);
+    lmfQSlider.addToParent    ("Q",    *this);
+    colourKnob (lmfFreqSlider, MentalsUI::Colours::electricBlue);
+    colourKnob (lmfGainSlider, MentalsUI::Colours::electricBlue);
+    colourKnob (lmfQSlider, MentalsUI::Colours::electricBlue);
+
+    lfFreqSlider.addToParent ("Freq", *this);
+    lfGainSlider.addToParent ("Gain", *this);
+    colourKnob (lfFreqSlider, MentalsUI::Colours::electricBlue);
+    colourKnob (lfGainSlider, MentalsUI::Colours::electricBlue);
 
     for (auto* b : { &lfBellToggle, &hfBellToggle, &eqInToggle })
     {
@@ -157,9 +232,54 @@ MentalsChannelStripAudioProcessorEditor::MentalsChannelStripAudioProcessorEditor
         addAndMakeVisible (*b);
     }
 
-    // ---- Output -----------------------------------------------------------------------
+    // ---- Dynamics (orange) ------------------------------------------------------------
+    compThresholdSlider.addToParent ("Thresh", *this);
+    compRatioSlider.addToParent     ("Ratio",  *this);
+    compAttackSlider.addToParent    ("Attack", *this);
+    compReleaseSlider.addToParent   ("Release",*this);
+    compMakeupSlider.addToParent    ("Makeup", *this);
+    addAndMakeVisible (compGrMeter);
+    for (auto* k : { &compThresholdSlider, &compRatioSlider, &compAttackSlider, &compReleaseSlider, &compMakeupSlider })
+        colourKnob (*k, MentalsUI::Colours::amberOrange);
+
+    gateThresholdSlider.addToParent ("Thresh", *this);
+    gateRatioSlider.addToParent     ("Ratio",  *this);
+    gateAttackSlider.addToParent    ("Attack", *this);
+    gateReleaseSlider.addToParent   ("Release",*this);
+    gateRangeSlider.addToParent     ("Range",  *this);
+    addAndMakeVisible (gateGrMeter);
+    for (auto* k : { &gateThresholdSlider, &gateRatioSlider, &gateAttackSlider, &gateReleaseSlider, &gateRangeSlider })
+        colourKnob (*k, MentalsUI::Colours::amberOrange);
+
+    for (auto* b : { &dynamicsInToggle, &dynamicsBeforeEqToggle })
+    {
+        b->setClickingTogglesState (true);
+        b->setColour (juce::TextButton::buttonColourId,   MentalsUI::Colours::slateGrayDark);
+        b->setColour (juce::TextButton::buttonOnColourId, MentalsUI::Colours::electricBlue);
+        addAndMakeVisible (*b);
+    }
+
+    // ---- Output (grey/black) -----------------------------------------------------------
     outputGainSlider.addToParent ("Gain", *this);
     addAndMakeVisible (outputMeter);
+    colourKnob (outputGainSlider, MentalsUI::Colours::slateGray);
+
+    // No value read-out below any knob -- only the range numbers the
+    // hardware LookAndFeel prints AROUND the knob itself stay (see
+    // HardwareLookAndFeel::drawRotarySlider()); the name label ABOVE each
+    // knob (added via addToParent()'s attachToComponent call above) stays
+    // too, since only "labels below" were the ask.
+    for (auto* knob : { &hpfFreqSlider, &lpfFreqSlider,
+                         &hfFreqSlider, &hfGainSlider,
+                         &hmfFreqSlider, &hmfGainSlider, &hmfQSlider,
+                         &lmfFreqSlider, &lmfGainSlider, &lmfQSlider,
+                         &lfFreqSlider, &lfGainSlider,
+                         &compThresholdSlider, &compRatioSlider, &compAttackSlider, &compReleaseSlider, &compMakeupSlider,
+                         &gateThresholdSlider, &gateRatioSlider, &gateAttackSlider, &gateReleaseSlider, &gateRangeSlider,
+                         &outputGainSlider })
+    {
+        knob->slider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+    }
 
     // ---- Attachments --------------------------------------------------------------
     auto& apvts = processor.apvts;
@@ -194,10 +314,16 @@ MentalsChannelStripAudioProcessorEditor::MentalsChannelStripAudioProcessorEditor
     lfBellAttachment           = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (apvts, "lfBell", lfBellToggle);
     hfBellAttachment           = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (apvts, "hfBell", hfBellToggle);
     eqInAttachment             = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (apvts, "eqIn", eqInToggle);
+    stereoAttachment           = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (apvts, "stereo", stereoToggle);
 
     setResizable (true, true);
-    setResizeLimits (1200, 780, 1900, 1200);
-    setSize (1350, 860);
+    // Minimum == default, deliberately: whatever size the standalone host
+    // window/DAW actually opens this editor at, it can never be smaller
+    // than exactly the size that shows every control with nothing clipped
+    // (verified by screenshot) -- no smaller "natural"/remembered size can
+    // ever slip through.
+    setResizeLimits (1400, 700, 1650, 950);
+    setSize (1400, 700);
 }
 
 MentalsChannelStripAudioProcessorEditor::~MentalsChannelStripAudioProcessorEditor()
@@ -300,6 +426,20 @@ void MentalsChannelStripAudioProcessorEditor::paint (juce::Graphics& g)
         MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getRight() - inset, panelBoundsF.getY() + inset });
         MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getX() + inset, panelBoundsF.getBottom() - inset });
         MentalsUI::HardwareLookAndFeel::drawScrew (g, { panelBoundsF.getRight() - inset, panelBoundsF.getBottom() - inset });
+
+        // Thin vertical divider between the EQ (left) and Dynamics (right)
+        // columns, matching the SSL reference's own hard split down the middle.
+        g.setColour (MentalsUI::Colours::slateGray);
+        g.drawVerticalLine ((int) panelBoundsF.getCentreX(), panelBoundsF.getY() + 12.0f, panelBoundsF.getBottom() - 12.0f);
+    }
+
+    // Grouping box around the whole Dynamics block (Compressor + Gate
+    // together) so it reads as one deliberate unit, matching the SSL
+    // reference's own bordered Dynamics section.
+    if (! lastDynamicsBounds.isEmpty())
+    {
+        g.setColour (MentalsUI::Colours::slateGray);
+        g.drawRoundedRectangle (lastDynamicsBounds.toFloat(), 4.0f, 1.2f);
     }
 
     constexpr float earWidth = 22.0f;
@@ -308,15 +448,20 @@ void MentalsChannelStripAudioProcessorEditor::paint (juce::Graphics& g)
     MentalsUI::HardwareLookAndFeel::drawRackEar (g, fullBounds.removeFromRight (earWidth).reduced (2.0f));
 }
 
+//==============================================================================
+// Two-column SSL-style layout: EQ down the left, Dynamics + Gain down the
+// right (see class comment in the header) -- short enough top to bottom to
+// fit an ordinary laptop screen without resizing, unlike a single tall
+// vertical stack.
+//==============================================================================
 void MentalsChannelStripAudioProcessorEditor::resized()
 {
     auto area = getLocalBounds();
-    area.removeFromLeft (24);
-    area.removeFromRight (24);
+    area.removeFromLeft (12);
+    area.removeFromRight (12);
 
     constexpr int topBarHeight   = 40;
     constexpr int splitterHeight = 6;
-    constexpr int curveHeight    = 150;
 
     auto topBarArea = area.removeFromTop (topBarHeight);
     {
@@ -327,96 +472,163 @@ void MentalsChannelStripAudioProcessorEditor::resized()
         presetSaveButton.setBounds (t.removeFromRight (60));
         t.removeFromRight (8);
         presetsButton.setBounds (t.removeFromRight (140));
+        t.removeFromRight (12);
+        stereoToggle.setBounds (t.removeFromRight (80));
     }
 
-    curve.setBounds (area.removeFromTop (curveHeight).reduced (8));
     splitter.setBounds (area.removeFromTop (splitterHeight));
 
     lastPanelBounds = area;
 
-    auto panel = area.reduced (10);
-    const int rowHeight = panel.getHeight() / 2;
+    auto panel = area.reduced (8, 8);
 
-    // ---- Row 1: Filters | Compressor | Gate/Expander | Output --------------------
-    auto row1 = panel.removeFromTop (rowHeight);
+    // EQ column is wider than Dynamics (it packs HF/HMF/LMF/LF two-across --
+    // see below -- trading the screen's spare WIDTH for less HEIGHT, so the
+    // whole strip fits on an ordinary screen at its default size with no
+    // scrolling or resizing needed).
+    constexpr int columnGap = 14;
+    auto leftColumn  = panel.removeFromLeft ((panel.getWidth() * 50) / 100);
+    panel.removeFromLeft (columnGap);
+    auto rightColumn = panel;
+
+    constexpr int labelHeight   = 14;
+    constexpr int headroom      = 16; // space for each knob's own attachToComponent label above it
+    constexpr int knobSize      = 120; // every knob on this strip is this size -- matches the Gain knob
+    constexpr int toggleHeight  = 18;
+    constexpr int sectionGap    = 8;
+
+    // Every knob gets the SAME fixed square size (knobSize), centred in an
+    // evenly-divided cell -- so a 2-knob row and a 5-knob row both use
+    // identically-sized knobs, just with more or less breathing room
+    // between them, rather than knobs shrinking to fit more of them in.
+    auto layoutKnobRow = [knobSize] (juce::Rectangle<int> row, std::initializer_list<MentalsUI::LabelledSlider*> knobs)
     {
-        auto filtersArea = row1.removeFromLeft (200);
-        filtersLabel.setBounds (filtersArea.removeFromTop (20));
-        filtersArea.removeFromTop (20); // headroom for knob labels
-        auto knobRow = filtersArea.removeFromTop (90);
-        const int kw = knobRow.getWidth() / 2;
-        hpfFreqSlider.slider.setBounds (knobRow.removeFromLeft (kw).reduced (4, 0));
-        lpfFreqSlider.slider.setBounds (knobRow.reduced (4, 0));
-        auto toggleRow = filtersArea.removeFromTop (28);
-        filtersInToggle.setBounds (toggleRow.removeFromLeft (95).reduced (2));
-        filterSplitToggle.setBounds (toggleRow.removeFromLeft (95).reduced (2));
-
-        row1.removeFromLeft (10);
-
-        auto compArea = row1.removeFromLeft (420);
-        compLabel.setBounds (compArea.removeFromTop (20));
-        compArea.removeFromTop (20);
-        auto compKnobRow = compArea.removeFromTop (90);
-        MentalsUI::LabelledSlider* compKnobs[] { &compThresholdSlider, &compRatioSlider, &compAttackSlider, &compReleaseSlider, &compMakeupSlider };
-        const int compKw = compKnobRow.getWidth() * 3 / 4 / 5;
-        for (auto* k : compKnobs)
-            k->slider.setBounds (compKnobRow.removeFromLeft (compKw).reduced (4, 0));
-        compGrMeter.setBounds (compKnobRow.reduced (4, 0));
-
-        row1.removeFromLeft (10);
-
-        auto gateArea = row1.removeFromLeft (420);
-        gateLabel.setBounds (gateArea.removeFromTop (20));
-        gateArea.removeFromTop (20);
-        auto gateKnobRow = gateArea.removeFromTop (90);
-        MentalsUI::LabelledSlider* gateKnobs[] { &gateThresholdSlider, &gateRatioSlider, &gateAttackSlider, &gateReleaseSlider, &gateRangeSlider };
-        const int gateKw = gateKnobRow.getWidth() * 3 / 4 / 5;
-        for (auto* k : gateKnobs)
-            k->slider.setBounds (gateKnobRow.removeFromLeft (gateKw).reduced (4, 0));
-        gateGrMeter.setBounds (gateKnobRow.reduced (4, 0));
-        auto dynToggleRow = gateArea.removeFromTop (28);
-        dynamicsInToggle.setBounds (dynToggleRow.removeFromLeft (95).reduced (2));
-        dynamicsBeforeEqToggle.setBounds (dynToggleRow.removeFromLeft (95).reduced (2));
-
-        row1.removeFromLeft (10);
-
-        auto outputArea = row1;
-        outputLabel.setBounds (outputArea.removeFromTop (20));
-        outputArea.removeFromTop (20);
-        auto outputKnobRow = outputArea.removeFromTop (90);
-        outputGainSlider.slider.setBounds (outputKnobRow.removeFromLeft (outputKnobRow.getWidth() / 2).reduced (4, 0));
-        outputMeter.setBounds (outputKnobRow.reduced (4, 0));
-    }
-
-    panel.removeFromTop (10);
-
-    // ---- Row 2: LF | LMF | HMF | HF, with the single EQ In toggle reserved
-    // in its own strip at the top-right before the four bands are laid out.
-    auto row2 = panel;
-    auto eqInRow = row2.removeFromTop (26);
-    eqInToggle.setBounds (eqInRow.removeFromRight (90).reduced (2));
-
-    const int eqBandWidth = row2.getWidth() / 4;
-
-    auto layoutEqBand = [&] (juce::Rectangle<int> b, juce::Label& label,
-                              MentalsUI::LabelledSlider& freqSlider, MentalsUI::LabelledSlider& gainSlider,
-                              MentalsUI::LabelledSlider* qSlider, juce::TextButton* bellToggle)
-    {
-        label.setBounds (b.removeFromTop (20));
-        b.removeFromTop (20);
-        auto knobRow = b.removeFromTop (90);
-        const int numKnobs = qSlider != nullptr ? 3 : 2;
-        const int kw = knobRow.getWidth() / juce::jmax (1, numKnobs);
-        freqSlider.slider.setBounds (knobRow.removeFromLeft (kw).reduced (4, 0));
-        gainSlider.slider.setBounds (knobRow.removeFromLeft (kw).reduced (4, 0));
-        if (qSlider != nullptr)
-            qSlider->slider.setBounds (knobRow.removeFromLeft (kw).reduced (4, 0));
-        if (bellToggle != nullptr)
-            bellToggle->setBounds (b.removeFromTop (26).removeFromLeft (90).reduced (2));
+        const int cellWidth = row.getWidth() / (int) knobs.size();
+        for (auto* k : knobs)
+        {
+            auto cell = row.removeFromLeft (cellWidth);
+            k->slider.setBounds (cell.withSizeKeepingCentre (knobSize, row.getHeight()));
+        }
     };
 
-    layoutEqBand (row2.removeFromLeft (eqBandWidth).reduced (6, 0), lfLabel, lfFreqSlider, lfGainSlider, nullptr, &lfBellToggle);
-    layoutEqBand (row2.removeFromLeft (eqBandWidth).reduced (6, 0), lmfLabel, lmfFreqSlider, lmfGainSlider, &lmfQSlider, nullptr);
-    layoutEqBand (row2.removeFromLeft (eqBandWidth).reduced (6, 0), hmfLabel, hmfFreqSlider, hmfGainSlider, &hmfQSlider, nullptr);
-    layoutEqBand (row2.reduced (6, 0), hfLabel, hfFreqSlider, hfGainSlider, nullptr, &hfBellToggle);
+    //==========================================================================
+    // LEFT COLUMN -- Filters (full width), then the 4 EQ bands two-across
+    // (HF+HMF | LMF+LF) instead of all stacked in one lane -- same knobSize
+    // knobs, but using the screen's spare width instead of piling up height.
+    //==========================================================================
+    {
+        auto col = leftColumn;
+
+        auto filtersHeaderRow = col.removeFromTop (labelHeight);
+        filtersLabel.setBounds (filtersHeaderRow);
+        col.removeFromTop (headroom);
+        layoutKnobRow (col.removeFromTop (knobSize), { &hpfFreqSlider, &lpfFreqSlider });
+        col.removeFromTop (4);
+        {
+            auto toggleRow = col.removeFromTop (toggleHeight);
+            filtersInToggle.setBounds (toggleRow.removeFromLeft (90).reduced (2, 0));
+            toggleRow.removeFromLeft (6);
+            filterSplitToggle.setBounds (toggleRow.removeFromLeft (90).reduced (2, 0));
+        }
+        col.removeFromTop (sectionGap);
+
+        {
+            auto eqHeaderRow = col.removeFromTop (labelHeight);
+            eqInToggle.setBounds (eqHeaderRow.removeFromRight (80).reduced (0, 1));
+            eqLabel.setBounds (eqHeaderRow);
+        }
+        col.removeFromTop (4);
+
+        constexpr int laneGap = 10;
+        auto laneWidth = (col.getWidth() - laneGap) / 2;
+        auto laneA = col.removeFromLeft (laneWidth);
+        col.removeFromLeft (laneGap);
+        auto laneB = col;
+
+        // Lane A: HF, then HMF.
+        hfLabel.setBounds (laneA.removeFromTop (labelHeight));
+        laneA.removeFromTop (headroom);
+        layoutKnobRow (laneA.removeFromTop (knobSize), { &hfFreqSlider, &hfGainSlider });
+        laneA.removeFromTop (4);
+        hfBellToggle.setBounds (laneA.removeFromTop (toggleHeight).removeFromLeft (80).reduced (2, 0));
+        laneA.removeFromTop (sectionGap);
+
+        hmfLabel.setBounds (laneA.removeFromTop (labelHeight));
+        laneA.removeFromTop (headroom);
+        layoutKnobRow (laneA.removeFromTop (knobSize), { &hmfFreqSlider, &hmfGainSlider, &hmfQSlider });
+
+        // Lane B: LMF, then LF.
+        lmfLabel.setBounds (laneB.removeFromTop (labelHeight));
+        laneB.removeFromTop (headroom);
+        layoutKnobRow (laneB.removeFromTop (knobSize), { &lmfFreqSlider, &lmfGainSlider, &lmfQSlider });
+        laneB.removeFromTop (sectionGap);
+
+        lfLabel.setBounds (laneB.removeFromTop (labelHeight));
+        laneB.removeFromTop (headroom);
+        layoutKnobRow (laneB.removeFromTop (knobSize), { &lfFreqSlider, &lfGainSlider });
+        laneB.removeFromTop (4);
+        lfBellToggle.setBounds (laneB.removeFromTop (toggleHeight).removeFromLeft (80).reduced (2, 0));
+    }
+
+    //==========================================================================
+    // RIGHT COLUMN -- Dynamics (Compressor/Gate, each with its own bulb-style
+    // GR meter beside the knobs, the whole block boxed together -- see
+    // lastDynamicsBounds/paint()), then Gain/Output.
+    //==========================================================================
+    {
+        auto col = rightColumn;
+
+        auto dynamicsBlockStart = col;
+
+        dynamicsLabel.setBounds (col.removeFromTop (labelHeight + 4));
+        col.removeFromTop (10); // extra breathing room under the DYNAMICS header, not just the usual 4px
+
+        constexpr int meterWidth = 55;
+
+        // Each dynamics section is one row of all 5 knobs -- there's plenty
+        // of spare width in this column (see leftColumn/rightColumn split
+        // above) to give every knob its full knobSize without needing a
+        // second row.
+        compLabel.setBounds (col.removeFromTop (labelHeight));
+        col.removeFromTop (headroom);
+        {
+            auto row = col.removeFromTop (knobSize);
+            compGrMeter.setBounds (row.removeFromRight (meterWidth));
+            row.removeFromRight (10);
+            layoutKnobRow (row, { &compThresholdSlider, &compRatioSlider, &compAttackSlider, &compReleaseSlider, &compMakeupSlider });
+        }
+        col.removeFromTop (sectionGap + 4);
+
+        gateLabel.setBounds (col.removeFromTop (labelHeight));
+        col.removeFromTop (headroom);
+        {
+            auto row = col.removeFromTop (knobSize);
+            gateGrMeter.setBounds (row.removeFromRight (meterWidth));
+            row.removeFromRight (10);
+            layoutKnobRow (row, { &gateThresholdSlider, &gateRatioSlider, &gateAttackSlider, &gateReleaseSlider, &gateRangeSlider });
+        }
+        col.removeFromTop (8);
+        {
+            auto toggleRow = col.removeFromTop (toggleHeight);
+            dynamicsInToggle.setBounds (toggleRow.removeFromLeft (90).reduced (2, 0));
+            toggleRow.removeFromLeft (6);
+            dynamicsBeforeEqToggle.setBounds (toggleRow.removeFromLeft (90).reduced (2, 0));
+        }
+        col.removeFromTop (10);
+
+        // Everything from the DYNAMICS header down to just under the Dyn In /
+        // Dyn > EQ toggles gets boxed together as one visual unit.
+        lastDynamicsBounds = dynamicsBlockStart.withBottom (col.getY() - 6);
+
+        col.removeFromTop (sectionGap * 2);
+
+        outputLabel.setBounds (col.removeFromTop (labelHeight));
+        col.removeFromTop (headroom);
+        {
+            auto row = col.removeFromTop (knobSize);
+            outputMeter.setBounds (row.removeFromRight (meterWidth));
+            row.removeFromRight (18);
+            layoutKnobRow (row, { &outputGainSlider });
+        }
+    }
 }

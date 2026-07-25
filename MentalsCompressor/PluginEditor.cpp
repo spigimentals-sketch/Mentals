@@ -73,6 +73,34 @@ MentalsCompressorAudioProcessorEditor::MentalsCompressorAudioProcessorEditor (Me
     addAndMakeVisible (presetSaveButton);
     presetSaveButton.addListener (this);
 
+    aiAssistButton.setColour (juce::TextButton::buttonColourId,  MentalsUI::Colours::electricBlue);
+    aiAssistButton.setColour (juce::TextButton::textColourOffId, MentalsUI::Colours::white);
+    addAndMakeVisible (aiAssistButton);
+    aiAssistButton.addListener (this);
+
+    aiAssistLabel.setText ("AI Assist", juce::dontSendNotification);
+    aiAssistLabel.setColour (juce::Label::textColourId, MentalsUI::Colours::white);
+    aiAssistPanelContent.addAndMakeVisible (aiAssistLabel);
+
+    for (auto* b : { &aiAssistAnalyseButton, &aiAssistApplyButton })
+    {
+        b->setColour (juce::TextButton::buttonColourId,  MentalsUI::Colours::slateGrayDark);
+        b->setColour (juce::TextButton::textColourOffId, MentalsUI::Colours::white);
+        aiAssistPanelContent.addAndMakeVisible (*b);
+        b->addListener (this);
+    }
+
+    aiAssistStatusLabel.setColour (juce::Label::textColourId, MentalsUI::Colours::slateGray);
+    aiAssistStatusLabel.setText ("Not analysed", juce::dontSendNotification);
+    aiAssistPanelContent.addAndMakeVisible (aiAssistStatusLabel);
+
+    aiAssistPanelContent.setSize (300, 100);
+    layoutAiAssistPanelContent();
+
+    stereoToggle.setColour (juce::ToggleButton::textColourId, MentalsUI::Colours::white);
+    stereoToggle.setColour (juce::ToggleButton::tickColourId, MentalsUI::Colours::white);
+    addAndMakeVisible (stereoToggle);
+
     addAndMakeVisible (transferCurve);
     addAndMakeVisible (splitter);
 
@@ -118,23 +146,101 @@ MentalsCompressorAudioProcessorEditor::MentalsCompressorAudioProcessorEditor (Me
         processor.apvts, "mix", mixSlider.slider);
     sidechainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         processor.apvts, "useSidechain", sidechainToggle);
+    stereoAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        processor.apvts, "stereo", stereoToggle);
 
     setResizable (true, true);
     setResizeLimits (620, 560, 1300, 900);
     setSize (860, 600);
+
+    startTimer (300);
 }
 
 MentalsCompressorAudioProcessorEditor::~MentalsCompressorAudioProcessorEditor()
 {
+    stopTimer();
     setLookAndFeel (nullptr);
     presetSelector.removeListener (this);
     presetSaveButton.removeListener (this);
+    aiAssistButton.removeListener (this);
+    aiAssistAnalyseButton.removeListener (this);
+    aiAssistApplyButton.removeListener (this);
 }
 
 void MentalsCompressorAudioProcessorEditor::buttonClicked (juce::Button* button)
 {
     if (button == &presetSaveButton)
+    {
         promptToSavePreset();
+        return;
+    }
+
+    if (button == &aiAssistButton)
+    {
+        showAiAssistPanel();
+        return;
+    }
+
+    if (button == &aiAssistAnalyseButton)
+    {
+        processor.beginAiAssistAnalysis();
+        aiAssistStatusLabel.setText ("Listening to input...", juce::dontSendNotification);
+        aiAssistWasCapturing = true;
+        return;
+    }
+
+    if (button == &aiAssistApplyButton)
+    {
+        const bool applied = processor.applySuggestedCompressorSettings();
+        if (applied)
+        {
+            aiAssistStatusLabel.setText (
+                "Applied -- Thresh " + juce::String (processor.thresholdParam->get(), 1)
+                    + "dB, Ratio " + juce::String (processor.ratioParam->get(), 1) + ":1",
+                juce::dontSendNotification);
+        }
+        else
+        {
+            aiAssistStatusLabel.setText ("Nothing to apply -- analyze first", juce::dontSendNotification);
+        }
+        return;
+    }
+}
+
+void MentalsCompressorAudioProcessorEditor::timerCallback()
+{
+    const bool capturing = processor.isAiAssistCapturing();
+
+    if (capturing)
+    {
+        aiAssistStatusLabel.setText ("Listening to input...", juce::dontSendNotification);
+        aiAssistWasCapturing = true;
+    }
+    else if (aiAssistWasCapturing)
+    {
+        aiAssistWasCapturing = false;
+        aiAssistStatusLabel.setText ("Ready -- click Apply Suggestion", juce::dontSendNotification);
+    }
+}
+
+void MentalsCompressorAudioProcessorEditor::layoutAiAssistPanelContent()
+{
+    auto g = aiAssistPanelContent.getLocalBounds().reduced (10);
+
+    aiAssistLabel.setBounds (g.removeFromTop (18));
+    g.removeFromTop (4);
+    auto row = g.removeFromTop (26);
+    aiAssistAnalyseButton.setBounds (row.removeFromLeft (90));
+    row.removeFromLeft (6);
+    aiAssistApplyButton.setBounds (row);
+    g.removeFromTop (6);
+    aiAssistStatusLabel.setBounds (g.removeFromTop (40));
+}
+
+void MentalsCompressorAudioProcessorEditor::showAiAssistPanel()
+{
+    layoutAiAssistPanelContent();
+    MentalsUI::launchPopup (aiAssistPanelContent, aiAssistButton);
 }
 
 void MentalsCompressorAudioProcessorEditor::comboBoxChanged (juce::ComboBox* box)
@@ -236,6 +342,10 @@ void MentalsCompressorAudioProcessorEditor::resized()
         presetSelector.setBounds (t.removeFromLeft (160));
         t.removeFromLeft (8);
         presetSaveButton.setBounds (t.removeFromLeft (60));
+        t.removeFromLeft (12);
+        aiAssistButton.setBounds (t.removeFromLeft (90));
+        t.removeFromLeft (12);
+        stereoToggle.setBounds (t.removeFromLeft (80));
     }
 
     // Controls are bottom-anchored with a fixed height, and the transfer-
@@ -263,11 +373,27 @@ void MentalsCompressorAudioProcessorEditor::resized()
         knob->setBounds (row1.removeFromLeft (cellWidth1).reduced (4, 0));
 
     row2.removeFromTop (20);
-    juce::Array<juce::Component*> row2Knobs { &makeupGainSlider.slider, &mixSlider.slider,
-                                               &gainReductionMeter, &outputMeter };
+
+    // Meters get their own fixed-width cells (matching Reverb/De-esser's
+    // convention) rather than sharing an equal division with the knobs --
+    // dividing evenly with a tall row made the meter cell nearly square,
+    // when a real analog VU meter reads as a wide rectangle. Out sits
+    // rightmost, GR to its left.
+    constexpr int meterCellWidth = 200;
+    auto outMeterCell = row2.removeFromRight (meterCellWidth);
+    auto grMeterCell  = row2.removeFromRight (meterCellWidth);
+
+    juce::Array<juce::Component*> row2Knobs { &makeupGainSlider.slider, &mixSlider.slider };
     const int cellWidth2 = row2.getWidth() / (row2Knobs.size() + 1); // +1 reserves a cell for the sidechain toggle
     for (auto* knob : row2Knobs)
         knob->setBounds (row2.removeFromLeft (cellWidth2).reduced (4, 0));
 
     sidechainToggle.setBounds (row2.reduced (8, 0).withHeight (26).withY (row2.getY() + row2.getHeight() / 2 - 13));
+
+    // Meters are vertically centred within a fixed height band, rather than
+    // stretched to the row's full height, so they render as a landscape
+    // rectangle instead of filling a tall square cell.
+    constexpr int meterHeight = 100;
+    gainReductionMeter.setBounds (grMeterCell.withSizeKeepingCentre (grMeterCell.getWidth() - 12, meterHeight));
+    outputMeter.setBounds (outMeterCell.withSizeKeepingCentre (outMeterCell.getWidth() - 12, meterHeight));
 }

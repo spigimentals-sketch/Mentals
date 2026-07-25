@@ -135,9 +135,14 @@ private:
     juce::ToggleButton sidechainTuningToggle { "Sidechain Tuning" };
     juce::ToggleButton lowLatencyModeToggle { "Low-Latency Mode" };
 
+    // When off, the final output is summed to mono -- a mono-compatibility
+    // check/forcing switch, same control every Mentals plugin now has.
+    juce::ToggleButton stereoToggle { "Stereo" };
+
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>
         formantPreservationAttachment, adaptiveRetuneAttachment,
-        midiControlAttachment, sidechainTuningAttachment, lowLatencyModeAttachment;
+        midiControlAttachment, sidechainTuningAttachment, lowLatencyModeAttachment,
+        stereoAttachment;
 
     //==========================================================================
     // AI Assist popup content: measures the input's own recently-detected

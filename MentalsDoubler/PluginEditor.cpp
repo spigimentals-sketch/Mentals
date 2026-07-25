@@ -2,62 +2,72 @@
 #include "PluginEditor.h"
 
 //==============================================================================
-// LfoPreviewComponent
+// DoublerVoicesComponent
 //==============================================================================
-void LfoPreviewComponent::paint (juce::Graphics& g)
+void DoublerVoicesComponent::paint (juce::Graphics& g)
 {
     g.fillAll (MentalsUI::Colours::slateGrayDark);
 
-    auto bounds = getLocalBounds().toFloat().reduced (10.0f);
-    const float depthMs = processor.depthParam->get();
+    auto bounds = getLocalBounds().toFloat().reduced (16.0f, 14.0f);
 
-    // Centre reference line.
+    const int numVoices = MentalsDoublerAudioProcessor::voiceCountChoices[
+        (size_t) juce::jlimit (0, 1, processor.voicesParam->getIndex())];
+    const float detune   = processor.detuneParam->get();
+    const float width    = processor.stereoParam->get() ? processor.widthParam->get() : 0.0f;
+    const float humanize = juce::jlimit (0.0f, 100.0f, processor.humanizeParam->get());
+
+    // Centre reference line (the dry signal's own position -- always dead
+    // centre, no detune).
     g.setColour (juce::Colours::white.withAlpha (0.15f));
+    g.drawVerticalLine ((int) bounds.getCentreX(), bounds.getY(), bounds.getBottom());
     g.drawHorizontalLine ((int) bounds.getCentreY(), bounds.getX(), bounds.getRight());
 
-    // Two full cycles across the width, height-scaled by Depth relative to
-    // its own maximum (so the shape is always visible even at low Depth).
-    constexpr float maxDepthMs = 10.0f;
-    const float amplitude = (depthMs / maxDepthMs) * bounds.getHeight() * 0.45f;
+    const float maxCents = MentalsDoublerAudioProcessor::maxDetuneCents;
 
-    juce::Path curve;
-    constexpr int numPoints = 200;
-    for (int i = 0; i <= numPoints; ++i)
+    for (int v = 0; v < numVoices; ++v)
     {
-        const float t = (float) i / (float) numPoints;
-        const float x = bounds.getX() + t * bounds.getWidth();
-        const float y = bounds.getCentreY() - amplitude * std::sin (t * juce::MathConstants<float>::twoPi * 2.0f);
+        const float cents = MentalsDoublerAudioProcessor::computeVoiceBaseDetuneCents (v, numVoices, detune);
+        const float pan   = MentalsDoublerAudioProcessor::computeVoicePan (v, numVoices, width);
 
-        if (i == 0) curve.startNewSubPath (x, y);
-        else        curve.lineTo (x, y);
+        const float x = bounds.getCentreX() + pan * bounds.getWidth() * 0.5f;
+        const float y = bounds.getCentreY() - (cents / juce::jmax (1.0f, maxCents)) * bounds.getHeight() * 0.42f;
+
+        // Humanize shows as a soft halo around each voice's dot -- the more
+        // humanize, the more that voice wanders around its base position.
+        const float haloRadius = 6.0f + (humanize * 0.01f) * 14.0f;
+        g.setColour (MentalsUI::Colours::electricBlue.withAlpha (0.12f + humanize * 0.0015f));
+        g.fillEllipse (juce::Rectangle<float> (haloRadius * 2.0f, haloRadius * 2.0f).withCentre ({ x, y }));
+
+        g.setColour (MentalsUI::Colours::goldenYellow);
+        g.fillEllipse (juce::Rectangle<float> (10.0f, 10.0f).withCentre ({ x, y }));
+
+        g.setColour (MentalsUI::Colours::white);
+        g.setFont (juce::Font (juce::FontOptions (10.0f)));
+        g.drawText (juce::String (v + 1), juce::Rectangle<float> (18.0f, 14.0f).withCentre ({ x, y - 14.0f }),
+                    juce::Justification::centred);
     }
 
-    g.setColour (MentalsUI::Colours::goldenYellow);
-    g.strokePath (curve, juce::PathStrokeType (2.0f));
+    // Dry marker, dead centre.
+    g.setColour (MentalsUI::Colours::white);
+    g.drawEllipse (juce::Rectangle<float> (10.0f, 10.0f).withCentre (bounds.getCentre()), 1.5f);
 
-    // Playhead: the left channel's actual current phase, wrapped into the
-    // same two-cycle window.
-    const float phase01 = processor.getLfoPhase01();
-    const float playheadT = std::fmod (phase01 * 2.0f, 1.0f);
-    const float playheadX = bounds.getX() + playheadT * bounds.getWidth();
-    const float playheadY = bounds.getCentreY() - amplitude * std::sin (playheadT * juce::MathConstants<float>::twoPi * 2.0f);
-
-    g.setColour (MentalsUI::Colours::electricBlue);
-    g.fillEllipse (juce::Rectangle<float> (8.0f, 8.0f).withCentre ({ playheadX, playheadY }));
+    g.setColour (MentalsUI::Colours::slateGray);
+    g.setFont (juce::Font (juce::FontOptions (11.0f)));
+    g.drawText ("Pan (Width) / Detune (cents)  --  ring = Humanize", bounds, juce::Justification::bottomLeft);
 }
 
 //==============================================================================
-// MentalsChorusAudioProcessorEditor
+// MentalsDoublerAudioProcessorEditor
 //==============================================================================
-MentalsChorusAudioProcessorEditor::MentalsChorusAudioProcessorEditor (MentalsChorusAudioProcessor& p)
-    : AudioProcessorEditor (&p), processor (p), lfoPreview (p),
+MentalsDoublerAudioProcessorEditor::MentalsDoublerAudioProcessorEditor (MentalsDoublerAudioProcessor& p)
+    : AudioProcessorEditor (&p), processor (p), voicesGraph (p),
       outputMeter ([&p] { return p.getOutputPeakDb(); })
 {
     setLookAndFeel (&hardwareLookAndFeel);
 
     addAndMakeVisible (logoImage);
 
-    productNameLabel.setText ("Chorus", juce::dontSendNotification);
+    productNameLabel.setText ("Doubler", juce::dontSendNotification);
     productNameLabel.setColour (juce::Label::textColourId, MentalsUI::Colours::white);
     productNameLabel.setFont (juce::Font (juce::FontOptions (16.0f).withStyle ("Bold")));
     addAndMakeVisible (productNameLabel);
@@ -80,14 +90,26 @@ MentalsChorusAudioProcessorEditor::MentalsChorusAudioProcessorEditor (MentalsCho
     stereoToggle.setColour (juce::ToggleButton::tickColourId, MentalsUI::Colours::white);
     addAndMakeVisible (stereoToggle);
 
-    addAndMakeVisible (lfoPreview);
+    addAndMakeVisible (voicesGraph);
     addAndMakeVisible (splitter);
 
-    rateSlider.addToParent     ("Rate",     *this);
-    depthSlider.addToParent    ("Depth",    *this);
-    delaySlider.addToParent    ("Delay",    *this);
-    feedbackSlider.addToParent ("Feedback", *this);
-    mixSlider.addToParent      ("Mix",      *this);
+    voicesLabel.setText ("Voices", juce::dontSendNotification);
+    voicesLabel.setColour (juce::Label::textColourId, MentalsUI::Colours::white);
+    addAndMakeVisible (voicesLabel);
+
+    voicesSelector.addItemList ({ "2", "4" }, 1);
+    voicesSelector.setColour (juce::ComboBox::backgroundColourId, MentalsUI::Colours::slateGrayDark);
+    voicesSelector.setColour (juce::ComboBox::textColourId,       MentalsUI::Colours::white);
+    voicesSelector.setColour (juce::ComboBox::outlineColourId,    MentalsUI::Colours::slateGray);
+    voicesSelector.setColour (juce::ComboBox::arrowColourId,      MentalsUI::Colours::white);
+    addAndMakeVisible (voicesSelector);
+
+    detuneSlider.addToParent    ("Detune",   *this);
+    delaySlider.addToParent     ("Delay",    *this);
+    widthSlider.addToParent     ("Width",    *this);
+    humanizeSlider.addToParent  ("Humanize", *this);
+    lowCutSlider.addToParent    ("Low Cut",  *this);
+    mixSlider.addToParent       ("Mix",      *this);
 
     outputMeterLabel.setText ("Out", juce::dontSendNotification);
     outputMeterLabel.setColour (juce::Label::textColourId, MentalsUI::Colours::white);
@@ -96,38 +118,42 @@ MentalsChorusAudioProcessorEditor::MentalsChorusAudioProcessorEditor (MentalsCho
     addAndMakeVisible (outputMeterLabel);
     addAndMakeVisible (outputMeter);
 
-    rateAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
-        processor.apvts, "rate", rateSlider.slider);
-    depthAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
-        processor.apvts, "depth", depthSlider.slider);
+    voicesAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
+        processor.apvts, "voices", voicesSelector);
+    detuneAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        processor.apvts, "detune", detuneSlider.slider);
     delayAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processor.apvts, "delay", delaySlider.slider);
-    feedbackAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
-        processor.apvts, "feedback", feedbackSlider.slider);
+    widthAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        processor.apvts, "width", widthSlider.slider);
+    humanizeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        processor.apvts, "humanize", humanizeSlider.slider);
+    lowCutAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
+        processor.apvts, "lowCut", lowCutSlider.slider);
     mixAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processor.apvts, "mix", mixSlider.slider);
     stereoAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         processor.apvts, "stereo", stereoToggle);
 
     setResizable (true, true);
-    setResizeLimits (620, 460, 1300, 900);
-    setSize (860, 600);
+    setResizeLimits (700, 480, 1300, 900);
+    setSize (900, 600);
 }
 
-MentalsChorusAudioProcessorEditor::~MentalsChorusAudioProcessorEditor()
+MentalsDoublerAudioProcessorEditor::~MentalsDoublerAudioProcessorEditor()
 {
     setLookAndFeel (nullptr);
     presetSelector.removeListener (this);
     presetSaveButton.removeListener (this);
 }
 
-void MentalsChorusAudioProcessorEditor::buttonClicked (juce::Button* button)
+void MentalsDoublerAudioProcessorEditor::buttonClicked (juce::Button* button)
 {
     if (button == &presetSaveButton)
         promptToSavePreset();
 }
 
-void MentalsChorusAudioProcessorEditor::comboBoxChanged (juce::ComboBox* box)
+void MentalsDoublerAudioProcessorEditor::comboBoxChanged (juce::ComboBox* box)
 {
     if (box != &presetSelector)
         return;
@@ -139,7 +165,7 @@ void MentalsChorusAudioProcessorEditor::comboBoxChanged (juce::ComboBox* box)
         processor.presetManager.loadPreset (name);
 }
 
-void MentalsChorusAudioProcessorEditor::refreshPresetList()
+void MentalsDoublerAudioProcessorEditor::refreshPresetList()
 {
     const auto currentText = presetSelector.getText();
 
@@ -158,7 +184,7 @@ void MentalsChorusAudioProcessorEditor::refreshPresetList()
     presetSelector.setText (currentText, juce::dontSendNotification);
 }
 
-void MentalsChorusAudioProcessorEditor::promptToSavePreset()
+void MentalsDoublerAudioProcessorEditor::promptToSavePreset()
 {
     auto* window = new juce::AlertWindow ("Save Preset", "Enter a name for this preset:",
                                            juce::MessageBoxIconType::NoIcon);
@@ -181,7 +207,7 @@ void MentalsChorusAudioProcessorEditor::promptToSavePreset()
     }), true /* deleteWhenDismissed */);
 }
 
-void MentalsChorusAudioProcessorEditor::paint (juce::Graphics& g)
+void MentalsDoublerAudioProcessorEditor::paint (juce::Graphics& g)
 {
     g.fillAll (juce::Colour (0xff0c0c0d));
 
@@ -206,7 +232,7 @@ void MentalsChorusAudioProcessorEditor::paint (juce::Graphics& g)
     MentalsUI::HardwareLookAndFeel::drawRackEar (g, fullBounds.removeFromRight (earWidth).reduced (2.0f));
 }
 
-void MentalsChorusAudioProcessorEditor::resized()
+void MentalsDoublerAudioProcessorEditor::resized()
 {
     auto area = getLocalBounds();
     area.removeFromLeft (24);
@@ -214,14 +240,14 @@ void MentalsChorusAudioProcessorEditor::resized()
 
     constexpr int topBarHeight   = 40;
     constexpr int splitterHeight = 8;
-    constexpr int panelHeight    = 220;
+    constexpr int panelHeight    = 250; // Voices row above the knobs, like Saturator's Type row
 
     auto topBarArea = area.removeFromTop (topBarHeight);
     {
         auto t = topBarArea.reduced (8, 4);
         logoImage.setBounds (t.removeFromLeft (90));
         t.removeFromLeft (8);
-        productNameLabel.setBounds (t.removeFromLeft (110));
+        productNameLabel.setBounds (t.removeFromLeft (90));
         t.removeFromLeft (12);
         presetSelector.setBounds (t.removeFromLeft (160));
         t.removeFromLeft (8);
@@ -230,21 +256,39 @@ void MentalsChorusAudioProcessorEditor::resized()
         stereoToggle.setBounds (t.removeFromLeft (80));
     }
 
+    // Controls are bottom-anchored with a fixed height, and the voice-spread
+    // graph always fills exactly whatever space remains above them.
     auto panelArea    = area.removeFromBottom (panelHeight);
     auto splitterArea = area.removeFromBottom (splitterHeight);
     auto graphArea    = area;
 
     lastPanelBounds = panelArea;
 
-    lfoPreview.setBounds (graphArea.reduced (8));
+    voicesGraph.setBounds (graphArea.reduced (8));
     splitter.setBounds (splitterArea);
 
     auto p = panelArea.reduced (10);
-    p.removeFromTop (20); // headroom for each knob's attachToComponent label above it
 
-    juce::Array<juce::Component*> knobs { &rateSlider.slider, &depthSlider.slider, &delaySlider.slider,
-                                           &feedbackSlider.slider, &mixSlider.slider, &outputMeter };
-    const int cellWidth = p.getWidth() / knobs.size();
+    auto voicesRow = p.removeFromTop (24);
+    voicesLabel.setBounds (voicesRow.removeFromLeft (50));
+    voicesSelector.setBounds (voicesRow.removeFromLeft (80));
+    p.removeFromTop (6);
+
+    auto knobArea = p;
+    knobArea.removeFromTop (20); // headroom for each knob's attachToComponent label above it
+
+    // Out gets its own fixed-width cell (matching Reverb/Compressor's
+    // convention) rather than sharing an equal division with the knobs --
+    // a real analog VU meter reads as a wide rectangle, not a square.
+    constexpr int meterCellWidth = 180;
+    auto meterCell = knobArea.removeFromRight (meterCellWidth);
+
+    juce::Array<juce::Component*> knobs { &detuneSlider.slider, &delaySlider.slider, &widthSlider.slider,
+                                           &humanizeSlider.slider, &lowCutSlider.slider, &mixSlider.slider };
+    const int cellWidth = knobArea.getWidth() / knobs.size();
     for (auto* knob : knobs)
-        knob->setBounds (p.removeFromLeft (cellWidth).reduced (4, 0));
+        knob->setBounds (knobArea.removeFromLeft (cellWidth).reduced (4, 0));
+
+    constexpr int meterHeight = 100;
+    outputMeter.setBounds (meterCell.withSizeKeepingCentre (meterCell.getWidth() - 12, meterHeight));
 }

@@ -443,6 +443,10 @@ MentalsStereoShaperAudioProcessorEditor::MentalsStereoShaperAudioProcessorEditor
     addAndMakeVisible (presetSaveButton);
     presetSaveButton.addListener (this);
 
+    stereoToggle.setColour (juce::ToggleButton::textColourId, MentalsUI::Colours::white);
+    stereoToggle.setColour (juce::ToggleButton::tickColourId, MentalsUI::Colours::white);
+    addAndMakeVisible (stereoToggle);
+
     addAndMakeVisible (analyzer);
     addAndMakeVisible (splitter);
 
@@ -489,6 +493,8 @@ MentalsStereoShaperAudioProcessorEditor::MentalsStereoShaperAudioProcessorEditor
         processor.apvts, "highWidth", highWidthSlider.slider);
     mixAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processor.apvts, "mix", mixSlider.slider);
+    stereoAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        processor.apvts, "stereo", stereoToggle);
 
     setResizable (true, true);
     setResizeLimits (760, 560, 1400, 1000);
@@ -614,6 +620,8 @@ void MentalsStereoShaperAudioProcessorEditor::resized()
         aiAssistButton.setBounds (t.removeFromRight (110));
         t.removeFromRight (8);
         phaseAlignButton.setBounds (t.removeFromRight (110));
+        t.removeFromRight (8);
+        stereoToggle.setBounds (t.removeFromRight (80));
     }
 
     auto panelArea    = area.removeFromBottom (panelHeight);

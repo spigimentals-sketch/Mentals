@@ -5,43 +5,49 @@
 #include "MentalsUI.h"
 
 //==============================================================================
-// LFO preview: two cycles of the sine wave currently shaping the delay-time
-// modulation, height-scaled by Depth -- computed directly from the current
-// parameter values (redrawn on a timer), same "illustrative, not captured
-// audio" approach as Mentals Delay's echo-pattern display. A moving dot
-// marks the left channel's actual current phase (polled from the
-// processor), so it's not purely static.
+// Classic 2D vectorscope/goniometer, rotated 45 degrees the same way Ozone
+// Imager's (and most hardware goniometers') display reads: a purely mono
+// signal draws a vertical line up the centre, a fully out-of-phase signal
+// draws a horizontal line, and stereo width shows as how far the trail
+// spreads sideways from that centre line. Deliberately a different visual
+// language from Mentals 360 Stereo Shaper's 3D perspective stage -- this one
+// reads instantly to anyone who has used a real goniometer.
+//
+// Fed straight from the processor's ring buffer of actual OUTPUT samples
+// (see getGoniometerL()/getGoniometerR()), not illustrative -- same
+// guarantee Stereo Shaper's analyzer makes. Correlation bar underneath uses
+// the identical layout/colour logic as Stereo Shaper's StereoAnalyzerComponent.
 //==============================================================================
-class LfoPreviewComponent : public juce::Component,
-                             private juce::Timer
+class ImagerGoniometerComponent : public juce::Component,
+                                   private juce::Timer
 {
 public:
-    explicit LfoPreviewComponent (MentalsChorusAudioProcessor& proc)
+    explicit ImagerGoniometerComponent (MentalsImagerAudioProcessor& proc)
         : processor (proc)
     {
         startTimerHz (30);
     }
 
-    ~LfoPreviewComponent() override { stopTimer(); }
+    ~ImagerGoniometerComponent() override { stopTimer(); }
 
     void paint (juce::Graphics& g) override;
 
 private:
     void timerCallback() override { repaint(); }
 
-    MentalsChorusAudioProcessor& processor;
+    MentalsImagerAudioProcessor& processor;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LfoPreviewComponent)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ImagerGoniometerComponent)
 };
 
 //==============================================================================
-class MentalsChorusAudioProcessorEditor : public juce::AudioProcessorEditor,
+class MentalsImagerAudioProcessorEditor : public juce::AudioProcessorEditor,
                                            private juce::Button::Listener,
                                            private juce::ComboBox::Listener
 {
 public:
-    explicit MentalsChorusAudioProcessorEditor (MentalsChorusAudioProcessor&);
-    ~MentalsChorusAudioProcessorEditor() override;
+    explicit MentalsImagerAudioProcessorEditor (MentalsImagerAudioProcessor&);
+    ~MentalsImagerAudioProcessorEditor() override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -52,8 +58,9 @@ private:
     void parentHierarchyChanged() override { MentalsUI::enableMaximiseButtonIfStandalone (*this); }
     void refreshPresetList();
     void promptToSavePreset();
+    void updateBandEnablement();
 
-    MentalsChorusAudioProcessor& processor;
+    MentalsImagerAudioProcessor& processor;
 
     MentalsUI::HardwareLookAndFeel hardwareLookAndFeel;
 
@@ -73,20 +80,25 @@ private:
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> stereoAttachment;
 
-    LfoPreviewComponent lfoPreview;
+    ImagerGoniometerComponent goniometer;
     MentalsUI::SplitterBar splitter;
 
     //==========================================================================
     // Controls.
     //==========================================================================
-    MentalsUI::LabelledSlider rateSlider, depthSlider, delaySlider, feedbackSlider;
+    juce::Label bandsLabel;
+    juce::ComboBox bandsSelector;
+    MentalsUI::LabelledSlider crossover1Slider, crossover2Slider, crossover3Slider;
+    MentalsUI::LabelledSlider width1Slider, width2Slider, width3Slider, width4Slider;
     MentalsUI::LabelledFader mixSlider; // dry/wet blend reads more naturally as a fader than a knob
 
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> bandsAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
-        rateAttachment, depthAttachment, delayAttachment, feedbackAttachment, mixAttachment;
+        crossover1Attachment, crossover2Attachment, crossover3Attachment,
+        width1Attachment, width2Attachment, width3Attachment, width4Attachment, mixAttachment;
 
     juce::Label outputMeterLabel;
     MentalsUI::AnalogVUMeterComponent outputMeter;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MentalsChorusAudioProcessorEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MentalsImagerAudioProcessorEditor)
 };

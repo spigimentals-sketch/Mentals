@@ -16,6 +16,7 @@ MentalsGateAudioProcessor::MentalsGateAudioProcessor()
     rangeParam        = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("range"));
     mixParam          = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("mix"));
     useSidechainParam = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("useSidechain"));
+    stereoParam       = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("stereo"));
 
     seedFactoryPresetsIfMissing();
 }
@@ -57,6 +58,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout MentalsGateAudioProcessor::c
 
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "useSidechain", "Use External Sidechain", false));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "stereo", "Stereo", true));
 
     return { params.begin(), params.end() };
 }
@@ -148,6 +152,16 @@ void MentalsGateAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, 
     }
 
     currentGainReductionDb.store (blockMinGainReductionDb);
+
+    if (! stereoParam->get() && numChannels > 1)
+    {
+        for (int n = 0; n < numSamples; ++n)
+        {
+            const float avg = 0.5f * (mainBuffer.getReadPointer (0)[n] + mainBuffer.getReadPointer (1)[n]);
+            mainBuffer.getWritePointer (0)[n] = avg;
+            mainBuffer.getWritePointer (1)[n] = avg;
+        }
+    }
 
     updateOutputLevelMeter (mainBuffer);
 }

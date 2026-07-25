@@ -128,6 +128,11 @@ public:
     juce::AudioParameterInt*   harmony2DegreeParam  = nullptr;
     juce::AudioParameterFloat* harmony2LevelParam   = nullptr;
 
+    // When off, the final output is summed to mono (both channels made
+    // identical) -- a mono-compatibility check/forcing switch, same control
+    // every Mentals plugin now has.
+    juce::AudioParameterBool* stereoParam = nullptr;
+
     //==========================================================================
     // AI Assist: listens to a few seconds of live input, then suggests a
     // Retune Speed/Amount pairing based on how much the detected pitch

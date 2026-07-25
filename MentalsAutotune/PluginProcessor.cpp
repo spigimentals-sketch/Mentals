@@ -28,6 +28,7 @@ MentalsAutotuneAudioProcessor::MentalsAutotuneAudioProcessor()
     harmony2EnabledParam = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("harmony2Enabled"));
     harmony2DegreeParam  = dynamic_cast<juce::AudioParameterInt*>   (apvts.getParameter ("harmony2Degree"));
     harmony2LevelParam   = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("harmony2Level"));
+    stereoParam          = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("stereo"));
 
     ensureFactoryPresetsExist();
 }
@@ -167,6 +168,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout MentalsAutotuneAudioProcesso
         "harmony2Level", "Harmony 2 Level",
         juce::NormalisableRange<float> (-24.0f, 0.0f, 0.01f), -6.0f,
         juce::AudioParameterFloatAttributes().withLabel ("dB")));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "stereo", "Stereo", true));
 
     return { params.begin(), params.end() };
 }
@@ -668,6 +672,16 @@ void MentalsAutotuneAudioProcessor::processBlock (juce::AudioBuffer<float>& buff
                 data[n] += harmony1Shifters[(size_t) ch].process (dry, smoothedHarmony1Ratio) * harmony1Gain;
             if (harmony2On)
                 data[n] += harmony2Shifters[(size_t) ch].process (dry, smoothedHarmony2Ratio) * harmony2Gain;
+        }
+    }
+
+    if (! stereoParam->get() && numChannels > 1)
+    {
+        for (int n = 0; n < numSamples; ++n)
+        {
+            const float avg = 0.5f * (mainBuffer.getReadPointer (0)[n] + mainBuffer.getReadPointer (1)[n]);
+            mainBuffer.getWritePointer (0)[n] = avg;
+            mainBuffer.getWritePointer (1)[n] = avg;
         }
     }
 

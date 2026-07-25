@@ -218,6 +218,7 @@ MultiModeEQAudioProcessor::MultiModeEQAudioProcessor()
 
     autoGainParam  = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("autoGain"));
     phaseModeParam = dynamic_cast<juce::AudioParameterChoice*> (apvts.getParameter ("phaseMode"));
+    stereoParam    = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("stereo"));
 
     // Allocated once, here, and never resized again for the processor's
     // lifetime -- see the comment on visualiserFifoCapacity below for why
@@ -320,6 +321,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout MultiModeEQAudioProcessor::c
 
     params.push_back (std::make_unique<juce::AudioParameterChoice> (
         "phaseMode", "Phase Mode", juce::StringArray { "Zero Latency", "Natural Phase" }, 0));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "stereo", "Stereo", true));
 
     return { params.begin(), params.end() };
 }
@@ -1565,6 +1569,18 @@ void MultiModeEQAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, 
 
     if (autoGainOn)
         updateAutoGain (dryBuffer, mainBuffer);
+
+    if (! stereoParam->get() && mainBuffer.getNumChannels() > 1)
+    {
+        auto* monoL = mainBuffer.getWritePointer (0);
+        auto* monoR = mainBuffer.getWritePointer (1);
+        for (int n = 0; n < mainBuffer.getNumSamples(); ++n)
+        {
+            const float avg = 0.5f * (monoL[n] + monoR[n]);
+            monoL[n] = avg;
+            monoR[n] = avg;
+        }
+    }
 
     updateSpectrumAnalyser (mainBuffer);
     updateOutputLevelMeter (mainBuffer);

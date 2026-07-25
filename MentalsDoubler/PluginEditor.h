@@ -5,43 +5,45 @@
 #include "MentalsUI.h"
 
 //==============================================================================
-// Transfer-curve display: input amplitude (-1..1, scaled by Drive) on the X
-// axis, output amplitude on the Y axis, with a faint diagonal reference line
-// showing what "no saturation" would look like. Calls SaturatorDSP::
-// waveshape() directly -- the exact same function processBlock() uses -- so
-// this can never show a curve that doesn't match what's actually happening
-// to the audio, unlike Delay/Reverb's illustrative parametric visualisations.
+// Voice-spread visualisation: one dot per active voice, X = its pan position
+// (after Width), Y = its detune offset (after Detune), dot glow modulated by
+// Humanize. Calls MentalsDoublerAudioProcessor::computeVoiceBaseDetuneCents()/
+// computeVoicePan() directly -- the exact same functions processBlock() uses
+// -- so this can never show an arrangement that doesn't match what's
+// actually playing. Illustrative/parameter-driven (redrawn on a timer), not
+// captured from live audio, the same approach as Mentals Delay's echo-
+// pattern display.
 //==============================================================================
-class SaturatorTransferCurveComponent : public juce::Component,
+class DoublerVoicesComponent : public juce::Component,
                                 private juce::Timer
 {
 public:
-    explicit SaturatorTransferCurveComponent (MentalsSaturatorAudioProcessor& proc)
+    explicit DoublerVoicesComponent (MentalsDoublerAudioProcessor& proc)
         : processor (proc)
     {
         startTimerHz (20);
     }
 
-    ~SaturatorTransferCurveComponent() override { stopTimer(); }
+    ~DoublerVoicesComponent() override { stopTimer(); }
 
     void paint (juce::Graphics& g) override;
 
 private:
     void timerCallback() override { repaint(); }
 
-    MentalsSaturatorAudioProcessor& processor;
+    MentalsDoublerAudioProcessor& processor;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SaturatorTransferCurveComponent)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DoublerVoicesComponent)
 };
 
 //==============================================================================
-class MentalsSaturatorAudioProcessorEditor : public juce::AudioProcessorEditor,
-                                              private juce::Button::Listener,
-                                              private juce::ComboBox::Listener
+class MentalsDoublerAudioProcessorEditor : public juce::AudioProcessorEditor,
+                                            private juce::Button::Listener,
+                                            private juce::ComboBox::Listener
 {
 public:
-    explicit MentalsSaturatorAudioProcessorEditor (MentalsSaturatorAudioProcessor&);
-    ~MentalsSaturatorAudioProcessorEditor() override;
+    explicit MentalsDoublerAudioProcessorEditor (MentalsDoublerAudioProcessor&);
+    ~MentalsDoublerAudioProcessorEditor() override;
 
     void paint (juce::Graphics&) override;
     void resized() override;
@@ -53,7 +55,7 @@ private:
     void refreshPresetList();
     void promptToSavePreset();
 
-    MentalsSaturatorAudioProcessor& processor;
+    MentalsDoublerAudioProcessor& processor;
 
     MentalsUI::HardwareLookAndFeel hardwareLookAndFeel;
 
@@ -73,23 +75,23 @@ private:
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> stereoAttachment;
 
-    SaturatorTransferCurveComponent transferCurve;
+    DoublerVoicesComponent voicesGraph;
     MentalsUI::SplitterBar splitter;
 
     //==========================================================================
     // Controls.
     //==========================================================================
-    juce::Label typeLabel;
-    juce::ComboBox typeSelector;
-    MentalsUI::LabelledSlider driveSlider, toneSlider, outputGainSlider;
+    juce::Label voicesLabel;
+    juce::ComboBox voicesSelector;
+    MentalsUI::LabelledSlider detuneSlider, delaySlider, widthSlider, humanizeSlider, lowCutSlider;
     MentalsUI::LabelledFader mixSlider; // dry/wet blend reads more naturally as a fader than a knob
 
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> typeAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> voicesAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
-        driveAttachment, toneAttachment, outputGainAttachment, mixAttachment;
+        detuneAttachment, delayAttachment, widthAttachment, humanizeAttachment, lowCutAttachment, mixAttachment;
 
     juce::Label outputMeterLabel;
     MentalsUI::AnalogVUMeterComponent outputMeter;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MentalsSaturatorAudioProcessorEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MentalsDoublerAudioProcessorEditor)
 };

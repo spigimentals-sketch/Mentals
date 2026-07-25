@@ -231,14 +231,14 @@ MentalsAutotuneAudioProcessorEditor::MentalsAutotuneAudioProcessorEditor (Mental
 
     // ---- Settings popup content ------------------------------------------------
     for (auto* toggle : { &formantPreservationToggle, &adaptiveRetuneToggle, &midiControlToggle,
-                          &sidechainTuningToggle, &lowLatencyModeToggle })
+                          &sidechainTuningToggle, &lowLatencyModeToggle, &stereoToggle })
     {
         toggle->setColour (juce::ToggleButton::textColourId, MentalsUI::Colours::white);
         toggle->setColour (juce::ToggleButton::tickColourId, MentalsUI::Colours::white);
         settingsPanelContent.addAndMakeVisible (*toggle);
     }
 
-    settingsPanelContent.setSize (240, 190);
+    settingsPanelContent.setSize (240, 224);
     layoutSettingsPanelContent();
 
     // ---- AI Assist popup content ------------------------------------------------
@@ -309,6 +309,8 @@ MentalsAutotuneAudioProcessorEditor::MentalsAutotuneAudioProcessorEditor (Mental
         processor.apvts, "sidechainTuning", sidechainTuningToggle);
     lowLatencyModeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         processor.apvts, "lowLatencyMode", lowLatencyModeToggle);
+    stereoAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        processor.apvts, "stereo", stereoToggle);
 
     harmony1EnabledAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         processor.apvts, "harmony1Enabled", harmony1EnabledToggle);
@@ -482,7 +484,7 @@ void MentalsAutotuneAudioProcessorEditor::layoutSettingsPanelContent()
 
     constexpr int rowHeight = 26, gap = 6;
     for (auto* toggle : { &formantPreservationToggle, &adaptiveRetuneToggle, &midiControlToggle,
-                          &sidechainTuningToggle, &lowLatencyModeToggle })
+                          &sidechainTuningToggle, &lowLatencyModeToggle, &stereoToggle })
     {
         toggle->setBounds (g.removeFromTop (rowHeight));
         g.removeFromTop (gap);

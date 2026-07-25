@@ -101,6 +101,12 @@ public:
     juce::AudioParameterFloat*  softnessParam = nullptr;
     juce::AudioParameterFloat*  lowCutParam   = nullptr;
 
+    // When off, the final output is summed to mono (both channels made
+    // identical) regardless of Spread or anything else upstream -- a mono-
+    // compatibility check/forcing switch, same control every Mentals plugin
+    // now has.
+    juce::AudioParameterBool* stereoParam = nullptr;
+
     static constexpr int maxVoices = 32;
     static const int voiceCountChoices[4];
 

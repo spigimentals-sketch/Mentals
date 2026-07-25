@@ -46,6 +46,7 @@ MentalsChannelStripAudioProcessor::MentalsChannelStripAudioProcessor()
 
     eqInParam       = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("eqIn"));
     outputGainParam = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("outputGain"));
+    stereoParam     = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("stereo"));
 
     seedFactoryPresetsIfMissing();
 }
@@ -133,6 +134,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout MentalsChannelStripAudioProc
     params.push_back (std::make_unique<juce::AudioParameterFloat> (
         "outputGain", "Output", juce::NormalisableRange<float> (-24.0f, 24.0f, 0.01f), 0.0f,
         juce::AudioParameterFloatAttributes().withLabel ("dB")));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "stereo", "Stereo", true));
 
     return { params.begin(), params.end() };
 }
@@ -329,6 +333,16 @@ void MentalsChannelStripAudioProcessor::processBlock (juce::AudioBuffer<float>& 
     currentCompGainReductionDb.store (blockMinCompGrDb);
     currentGateGainReductionDb.store (blockMinGateGrDb);
 
+    if (! stereoParam->get() && numChannels > 1)
+    {
+        for (int n = 0; n < numSamples; ++n)
+        {
+            const float avg = 0.5f * (buffer.getReadPointer (0)[n] + buffer.getReadPointer (1)[n]);
+            buffer.getWritePointer (0)[n] = avg;
+            buffer.getWritePointer (1)[n] = avg;
+        }
+    }
+
     updateOutputLevelMeter (buffer);
 }
 
@@ -346,21 +360,6 @@ void MentalsChannelStripAudioProcessor::updateOutputLevelMeter (const juce::Audi
         clipHoldBlocksRemaining.store ((int) (1.5 * currentSampleRate / juce::jmax (1, buffer.getNumSamples())));
     else if (clipHoldBlocksRemaining.load() > 0)
         clipHoldBlocksRemaining.fetch_sub (1);
-}
-
-double MentalsChannelStripAudioProcessor::getMagnitudeForFrequency (BandShape shape, double freqHz, double bandFreq, double q,
-                                                                     double gainDb, double sampleRate) noexcept
-{
-    Coeffs c;
-    switch (shape)
-    {
-        case BandShape::Bell:      c = Coeffs::bell      (sampleRate, (float) bandFreq, (float) q, (float) gainDb); break;
-        case BandShape::LowShelf:  c = Coeffs::lowShelf   (sampleRate, (float) bandFreq, (float) q, (float) gainDb); break;
-        case BandShape::HighShelf: c = Coeffs::highShelf  (sampleRate, (float) bandFreq, (float) q, (float) gainDb); break;
-        case BandShape::HighPass:  c = Coeffs::highPass   (sampleRate, (float) bandFreq, (float) q); break;
-        case BandShape::LowPass:   c = Coeffs::lowPass    (sampleRate, (float) bandFreq, (float) q); break;
-    }
-    return c.getMagnitudeForFrequency (freqHz, sampleRate);
 }
 
 //==============================================================================

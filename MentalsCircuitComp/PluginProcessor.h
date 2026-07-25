@@ -119,6 +119,13 @@ public:
     juce::AudioParameterBool*   multibandEnabledParam = nullptr;
     juce::AudioParameterBool*   stereoLinkParam       = nullptr;
 
+    // When off, the final output is summed to mono (both channels made
+    // identical) -- a mono-compatibility check/forcing switch, same control
+    // every Mentals plugin now has. Distinct from Stereo Link, which
+    // controls whether the two channels' detectors are linked, not whether
+    // the final output is collapsed to mono.
+    juce::AudioParameterBool* stereoParam = nullptr;
+
     // Per-band controls, used only when Multiband is on -- indexed 0..6,
     // Low-to-high. The editor rebinds its Threshold/Ratio/Attack/Release/
     // Makeup knobs to whichever of these is currently selected, the same

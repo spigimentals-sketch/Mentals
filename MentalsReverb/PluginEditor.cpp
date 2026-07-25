@@ -115,6 +115,10 @@ MentalsReverbAudioProcessorEditor::MentalsReverbAudioProcessorEditor (MentalsRev
     addAndMakeVisible (presetSaveButton);
     presetSaveButton.addListener (this);
 
+    stereoToggle.setColour (juce::ToggleButton::textColourId, MentalsUI::Colours::white);
+    stereoToggle.setColour (juce::ToggleButton::tickColourId, MentalsUI::Colours::white);
+    addAndMakeVisible (stereoToggle);
+
     addAndMakeVisible (decayEnvelope);
     addAndMakeVisible (splitter);
 
@@ -197,6 +201,8 @@ MentalsReverbAudioProcessorEditor::MentalsReverbAudioProcessorEditor (MentalsRev
         processor.apvts, "tempoSync", tempoSyncToggle);
     preDelayDivisionAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
         processor.apvts, "preDelayDivision", preDelayDivisionCombo);
+    stereoAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        processor.apvts, "stereo", stereoToggle);
 
     updatePreDelayEnablement();
 
@@ -335,6 +341,8 @@ void MentalsReverbAudioProcessorEditor::resized()
         presetSelector.setBounds (t.removeFromLeft (160));
         t.removeFromLeft (8);
         presetSaveButton.setBounds (t.removeFromLeft (60));
+        t.removeFromLeft (12);
+        stereoToggle.setBounds (t.removeFromLeft (80));
     }
 
     // Controls are bottom-anchored with a fixed height, and the decay-

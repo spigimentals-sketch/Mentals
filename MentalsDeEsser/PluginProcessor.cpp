@@ -21,6 +21,7 @@ MentalsDeEsserAudioProcessor::MentalsDeEsserAudioProcessor()
     maxReductionParam = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("maxReduction"));
     mixParam          = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("mix"));
     listenParam       = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("listen"));
+    stereoParam       = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("stereo"));
 
     seedFactoryPresetsIfMissing();
 }
@@ -67,6 +68,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout MentalsDeEsserAudioProcessor
 
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "listen", "Listen", false));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "stereo", "Stereo", true));
 
     return { params.begin(), params.end() };
 }
@@ -173,6 +177,16 @@ void MentalsDeEsserAudioProcessor::processBlock (juce::AudioBuffer<float>& buffe
     }
 
     currentGainReductionDb.store (blockMinGainReductionDb);
+
+    if (! stereoParam->get() && numChannels > 1)
+    {
+        for (int n = 0; n < numSamples; ++n)
+        {
+            const float avg = 0.5f * (buffer.getReadPointer (0)[n] + buffer.getReadPointer (1)[n]);
+            buffer.getWritePointer (0)[n] = avg;
+            buffer.getWritePointer (1)[n] = avg;
+        }
+    }
 
     updateOutputLevelMeter (buffer);
 }

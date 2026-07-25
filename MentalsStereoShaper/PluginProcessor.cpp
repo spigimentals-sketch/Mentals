@@ -38,6 +38,7 @@ MentalsStereoShaperAudioProcessor::MentalsStereoShaperAudioProcessor()
     highWidthParam      = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("highWidth"));
     phaseAlignParam     = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("phaseAlign"));
     mixParam            = dynamic_cast<juce::AudioParameterFloat*> (apvts.getParameter ("mix"));
+    stereoParam         = dynamic_cast<juce::AudioParameterBool*>  (apvts.getParameter ("stereo"));
 
     for (auto& a : goniometerL) a.store (0.0f);
     for (auto& a : goniometerR) a.store (0.0f);
@@ -107,6 +108,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout MentalsStereoShaperAudioProc
         "mix", "Mix",
         juce::NormalisableRange<float> (0.0f, 100.0f, 0.01f), 100.0f,
         juce::AudioParameterFloatAttributes().withLabel ("%")));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "stereo", "Stereo", true));
 
     return { params.begin(), params.end() };
 }
@@ -314,6 +318,18 @@ void MentalsStereoShaperAudioProcessor::processBlock (juce::AudioBuffer<float>& 
             ownFeatureAtomics[(size_t) i].store (ownFeatures[(size_t) i], std::memory_order_relaxed);
 
         mixRegistry.publish (ownFeatures, rotationParam->get(), widthParam->get());
+    }
+
+    if (! stereoParam->get() && buffer.getNumChannels() > 1)
+    {
+        auto* monoL = buffer.getWritePointer (0);
+        auto* monoR = buffer.getWritePointer (1);
+        for (int n = 0; n < numSamples; ++n)
+        {
+            const float avg = 0.5f * (monoL[n] + monoR[n]);
+            monoL[n] = avg;
+            monoR[n] = avg;
+        }
     }
 
     updateOutputLevelMeter (buffer);

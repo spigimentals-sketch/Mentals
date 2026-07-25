@@ -15,6 +15,7 @@ MentalsMaximizerAudioProcessor::MentalsMaximizerAudioProcessor()
     characterParam    = dynamic_cast<juce::AudioParameterFloat*>  (apvts.getParameter ("character"));
     stereoUnlinkParam = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("stereoUnlink"));
     mixParam          = dynamic_cast<juce::AudioParameterFloat*>  (apvts.getParameter ("mix"));
+    stereoParam       = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("stereo"));
 
     seedFactoryPresetsIfMissing();
 }
@@ -50,6 +51,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout MentalsMaximizerAudioProcess
         "mix", "Mix",
         juce::NormalisableRange<float> (0.0f, 100.0f, 0.01f), 100.0f,
         juce::AudioParameterFloatAttributes().withLabel ("%")));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "stereo", "Stereo", true));
 
     return { params.begin(), params.end() };
 }
@@ -259,6 +263,16 @@ void MentalsMaximizerAudioProcessor::processBlock (juce::AudioBuffer<float>& buf
     }
 
     currentGainReductionDb.store (blockMinGainReductionDb);
+
+    if (! stereoParam->get() && numChannels > 1)
+    {
+        for (int n = 0; n < numSamples; ++n)
+        {
+            const float avg = 0.5f * (buffer.getReadPointer (0)[n] + buffer.getReadPointer (1)[n]);
+            buffer.getWritePointer (0)[n] = avg;
+            buffer.getWritePointer (1)[n] = avg;
+        }
+    }
 
     for (int n = 0; n < numSamples; ++n)
     {

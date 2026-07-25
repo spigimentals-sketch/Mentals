@@ -84,8 +84,11 @@ private:
     //==========================================================================
     MentalsUI::MetallicLogoComponent logoImage;
     juce::Label productNameLabel;
+    juce::ToggleButton stereoToggle { "Stereo" };
     juce::ComboBox presetSelector;
     juce::TextButton presetSaveButton { "Save" };
+
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> stereoAttachment;
 
     DecayEnvelopeComponent decayEnvelope;
     MentalsUI::SplitterBar splitter;

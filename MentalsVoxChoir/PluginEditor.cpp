@@ -70,6 +70,10 @@ MentalsVoxChoirAudioProcessorEditor::MentalsVoxChoirAudioProcessorEditor (Mental
     addAndMakeVisible (presetSaveButton);
     presetSaveButton.addListener (this);
 
+    stereoToggle.setColour (juce::ToggleButton::textColourId, MentalsUI::Colours::white);
+    stereoToggle.setColour (juce::ToggleButton::tickColourId, MentalsUI::Colours::white);
+    addAndMakeVisible (stereoToggle);
+
     addAndMakeVisible (choirSpread);
     addAndMakeVisible (splitter);
 
@@ -117,6 +121,8 @@ MentalsVoxChoirAudioProcessorEditor::MentalsVoxChoirAudioProcessorEditor (Mental
         processor.apvts, "lowCut", lowCutSlider.slider);
     mixAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processor.apvts, "mix", mixSlider.slider);
+    stereoAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        processor.apvts, "stereo", stereoToggle);
 
     setResizable (true, true);
     setResizeLimits (760, 460, 1400, 900);
@@ -235,6 +241,8 @@ void MentalsVoxChoirAudioProcessorEditor::resized()
         presetSelector.setBounds (t.removeFromLeft (160));
         t.removeFromLeft (8);
         presetSaveButton.setBounds (t.removeFromLeft (60));
+        t.removeFromLeft (12);
+        stereoToggle.setBounds (t.removeFromLeft (80));
     }
 
     auto panelArea    = area.removeFromBottom (panelHeight);

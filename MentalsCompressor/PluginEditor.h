@@ -37,7 +37,8 @@ private:
 //==============================================================================
 class MentalsCompressorAudioProcessorEditor : public juce::AudioProcessorEditor,
                                                private juce::Button::Listener,
-                                               private juce::ComboBox::Listener
+                                               private juce::ComboBox::Listener,
+                                               private juce::Timer
 {
 public:
     explicit MentalsCompressorAudioProcessorEditor (MentalsCompressorAudioProcessor&);
@@ -49,9 +50,12 @@ public:
 private:
     void buttonClicked (juce::Button*) override;
     void comboBoxChanged (juce::ComboBox*) override;
+    void timerCallback() override; // polls AI Assist's capturing state
     void parentHierarchyChanged() override { MentalsUI::enableMaximiseButtonIfStandalone (*this); }
     void refreshPresetList();
     void promptToSavePreset();
+    void showAiAssistPanel();
+    void layoutAiAssistPanelContent();
 
     MentalsCompressorAudioProcessor& processor;
 
@@ -67,8 +71,23 @@ private:
     //==========================================================================
     MentalsUI::MetallicLogoComponent logoImage;
     juce::Label productNameLabel;
+    juce::TextButton aiAssistButton { "AI Assist" };
+    juce::Component aiAssistPanelContent;
+    juce::ToggleButton stereoToggle { "Stereo" };
     juce::ComboBox presetSelector;
     juce::TextButton presetSaveButton { "Save" };
+
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> stereoAttachment;
+
+    // AI Assist: listens to the detector signal for a few seconds and
+    // suggests Threshold/Ratio/Attack/Release/Makeup (see
+    // MentalsCompressorAudioProcessor::applySuggestedCompressorSettings()).
+    // Shown as its own popup (see showAiAssistPanel()), the same pattern
+    // Autotune/Multimode EQ's own AI Assist popups use.
+    juce::Label aiAssistLabel, aiAssistStatusLabel;
+    juce::TextButton aiAssistAnalyseButton { "Analyze" };
+    juce::TextButton aiAssistApplyButton   { "Apply Suggestion" };
+    bool aiAssistWasCapturing = false; // edge-detects capture-just-finished, to flip the status label once
 
     CompressorTransferCurveComponent transferCurve;
     MentalsUI::SplitterBar splitter;

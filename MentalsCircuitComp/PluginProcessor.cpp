@@ -121,6 +121,7 @@ MentalsCircuitCompAudioProcessor::MentalsCircuitCompAudioProcessor()
     useSidechainParam      = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("useSidechain"));
     multibandEnabledParam  = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("multibandEnabled"));
     stereoLinkParam        = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("stereoLink"));
+    stereoParam            = dynamic_cast<juce::AudioParameterBool*>   (apvts.getParameter ("stereo"));
 
     for (int i = 0; i < numBands; ++i)
     {
@@ -201,6 +202,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout MentalsCircuitCompAudioProce
 
     params.push_back (std::make_unique<juce::AudioParameterBool> (
         "stereoLink", "Stereo Link", true));
+
+    params.push_back (std::make_unique<juce::AudioParameterBool> (
+        "stereo", "Stereo", true));
 
     static const juce::StringArray bandNames { "Sub", "Low", "LowMid", "Mid", "HighMid", "High", "Air" };
 
@@ -547,6 +551,16 @@ void MentalsCircuitCompAudioProcessor::processBlock (juce::AudioBuffer<float>& b
         currentGainReductionDb.store (blockMinGainReductionDb);
         for (auto& gr : bandGainReductionDb)
             gr.store (0.0f);
+    }
+
+    if (! stereoParam->get() && numChannels > 1)
+    {
+        for (int n = 0; n < numSamples; ++n)
+        {
+            const float avg = 0.5f * (mainBuffer.getReadPointer (0)[n] + mainBuffer.getReadPointer (1)[n]);
+            mainBuffer.getWritePointer (0)[n] = avg;
+            mainBuffer.getWritePointer (1)[n] = avg;
+        }
     }
 
     updateOutputLevelMeter (mainBuffer);

@@ -132,12 +132,13 @@ private:
     juce::TextButton sidechainToggle { "Sidechain" };
     juce::TextButton multibandToggle { "Multiband" };
     juce::TextButton linkToggle      { "Link" };
+    juce::ToggleButton stereoToggle { "Stereo" };
     juce::ComboBox presetSelector;
     juce::TextButton presetSaveButton { "Save" };
 
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> modeAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>
-        sidechainAttachment, multibandAttachment, linkAttachment;
+        sidechainAttachment, multibandAttachment, linkAttachment, stereoAttachment;
 
     CircuitCompCurveComponent curve;
     MultibandSpectrumComponent spectrum;

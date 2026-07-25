@@ -79,6 +79,10 @@ MentalsDeEsserAudioProcessorEditor::MentalsDeEsserAudioProcessorEditor (MentalsD
     addAndMakeVisible (presetSaveButton);
     presetSaveButton.addListener (this);
 
+    stereoToggle.setColour (juce::ToggleButton::textColourId, MentalsUI::Colours::white);
+    stereoToggle.setColour (juce::ToggleButton::tickColourId, MentalsUI::Colours::white);
+    addAndMakeVisible (stereoToggle);
+
     addAndMakeVisible (transferCurve);
     addAndMakeVisible (splitter);
 
@@ -122,6 +126,8 @@ MentalsDeEsserAudioProcessorEditor::MentalsDeEsserAudioProcessorEditor (MentalsD
         processor.apvts, "mix", mixSlider.slider);
     listenAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         processor.apvts, "listen", listenToggle);
+    stereoAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        processor.apvts, "stereo", stereoToggle);
 
     setResizable (true, true);
     setResizeLimits (760, 560, 1300, 900);
@@ -244,6 +250,8 @@ void MentalsDeEsserAudioProcessorEditor::resized()
         presetSelector.setBounds (t.removeFromLeft (160));
         t.removeFromLeft (8);
         presetSaveButton.setBounds (t.removeFromLeft (60));
+        t.removeFromLeft (12);
+        stereoToggle.setBounds (t.removeFromLeft (80));
     }
 
     // Controls are bottom-anchored with a fixed height, and the transfer-

@@ -95,6 +95,10 @@ MentalsExciterEQAudioProcessorEditor::MentalsExciterEQAudioProcessorEditor (Ment
     addAndMakeVisible (presetSaveButton);
     presetSaveButton.addListener (this);
 
+    stereoToggle.setColour (juce::ToggleButton::textColourId, MentalsUI::Colours::white);
+    stereoToggle.setColour (juce::ToggleButton::tickColourId, MentalsUI::Colours::white);
+    addAndMakeVisible (stereoToggle);
+
     addAndMakeVisible (curve);
     addAndMakeVisible (splitter);
 
@@ -118,6 +122,8 @@ MentalsExciterEQAudioProcessorEditor::MentalsExciterEQAudioProcessorEditor (Ment
         processor.apvts, "airGain", airGainSlider.slider);
     mixAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processor.apvts, "mix", mixSlider.slider);
+    stereoAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        processor.apvts, "stereo", stereoToggle);
 
     setResizable (true, true);
     setResizeLimits (560, 420, 1200, 900);
@@ -236,6 +242,8 @@ void MentalsExciterEQAudioProcessorEditor::resized()
         presetSelector.setBounds (t.removeFromLeft (160));
         t.removeFromLeft (8);
         presetSaveButton.setBounds (t.removeFromLeft (60));
+        t.removeFromLeft (12);
+        stereoToggle.setBounds (t.removeFromLeft (80));
     }
 
     auto panelArea    = area.removeFromBottom (panelHeight);

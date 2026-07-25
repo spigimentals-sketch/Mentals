@@ -255,6 +255,10 @@ MentalsCircuitCompAudioProcessorEditor::MentalsCircuitCompAudioProcessorEditor (
     setupToggle (bandMuteToggle);
     setupToggle (bandSoloToggle);
 
+    stereoToggle.setColour (juce::ToggleButton::textColourId, MentalsUI::Colours::white);
+    stereoToggle.setColour (juce::ToggleButton::tickColourId, MentalsUI::Colours::white);
+    addAndMakeVisible (stereoToggle);
+
     presetSelector.setTextWhenNothingSelected ("Presets");
     presetSelector.setColour (juce::ComboBox::backgroundColourId, MentalsUI::Colours::slateGrayDark);
     presetSelector.setColour (juce::ComboBox::textColourId,       MentalsUI::Colours::white);
@@ -327,6 +331,8 @@ MentalsCircuitCompAudioProcessorEditor::MentalsCircuitCompAudioProcessorEditor (
         processor.apvts, "multibandEnabled", multibandToggle);
     linkAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         processor.apvts, "stereoLink", linkToggle);
+    stereoAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        processor.apvts, "stereo", stereoToggle);
 
     kneeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (
         processor.apvts, "knee", kneeSlider.slider);
@@ -573,6 +579,8 @@ void MentalsCircuitCompAudioProcessorEditor::resized()
         multibandToggle.setBounds (t.removeFromRight (90));
         t.removeFromRight (8);
         sidechainToggle.setBounds (t.removeFromRight (90));
+        t.removeFromRight (8);
+        stereoToggle.setBounds (t.removeFromRight (80));
     }
 
     auto panelArea    = area.removeFromBottom (panelHeight);

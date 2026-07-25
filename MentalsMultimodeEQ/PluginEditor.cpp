@@ -597,6 +597,10 @@ MultiModeEQAudioProcessorEditor::MultiModeEQAudioProcessorEditor (MultiModeEQAud
     autoGainToggle.setColour (juce::ToggleButton::tickColourId, EditorColours::white);
     settingsPanelContent.addAndMakeVisible (autoGainToggle);
 
+    stereoToggle.setColour (juce::ToggleButton::textColourId, EditorColours::white);
+    stereoToggle.setColour (juce::ToggleButton::tickColourId, EditorColours::white);
+    settingsPanelContent.addAndMakeVisible (stereoToggle);
+
     phaseModeLabel.setText ("Phase", juce::dontSendNotification);
     phaseModeLabel.setColour (juce::Label::textColourId, EditorColours::white);
     settingsPanelContent.addAndMakeVisible (phaseModeLabel);
@@ -639,7 +643,7 @@ MultiModeEQAudioProcessorEditor::MultiModeEQAudioProcessorEditor (MultiModeEQAud
     midiLearnStatusLabel.setText ("Not learning", juce::dontSendNotification);
     settingsPanelContent.addAndMakeVisible (midiLearnStatusLabel);
 
-    settingsPanelContent.setSize (340, 270);
+    settingsPanelContent.setSize (340, 304);
     layoutSettingsPanelContent();
 
     // ---- AI Assist popup content (its own popup, not part of Tools) -----------
@@ -694,6 +698,8 @@ MultiModeEQAudioProcessorEditor::MultiModeEQAudioProcessorEditor (MultiModeEQAud
         processor.apvts, "autoGain", autoGainToggle);
     phaseModeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (
         processor.apvts, "phaseMode", phaseModeSelector);
+    stereoAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        processor.apvts, "stereo", stereoToggle);
 
     startTimer (300);
 
@@ -1194,6 +1200,9 @@ void MultiModeEQAudioProcessorEditor::layoutSettingsPanelContent()
     auto g = settingsPanelContent.getLocalBounds().reduced (10);
 
     autoGainToggle.setBounds (g.removeFromTop (26));
+    g.removeFromTop (8);
+
+    stereoToggle.setBounds (g.removeFromTop (26));
     g.removeFromTop (8);
 
     auto pm = g.removeFromTop (24);

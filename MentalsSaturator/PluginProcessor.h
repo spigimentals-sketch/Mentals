@@ -61,6 +61,11 @@ public:
     juce::AudioParameterFloat*  outputGainParam = nullptr;
     juce::AudioParameterFloat*  mixParam        = nullptr;
 
+    // When off, the final output is summed to mono (both channels made
+    // identical) -- a mono-compatibility check/forcing switch, same control
+    // every Mentals plugin now has.
+    juce::AudioParameterBool* stereoParam = nullptr;
+
 private:
     juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
     void seedFactoryPresetsIfMissing();

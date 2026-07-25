@@ -75,6 +75,10 @@ MentalsGateAudioProcessorEditor::MentalsGateAudioProcessorEditor (MentalsGateAud
     addAndMakeVisible (presetSaveButton);
     presetSaveButton.addListener (this);
 
+    stereoToggle.setColour (juce::ToggleButton::textColourId, MentalsUI::Colours::white);
+    stereoToggle.setColour (juce::ToggleButton::tickColourId, MentalsUI::Colours::white);
+    addAndMakeVisible (stereoToggle);
+
     addAndMakeVisible (transferCurve);
     addAndMakeVisible (splitter);
 
@@ -117,6 +121,8 @@ MentalsGateAudioProcessorEditor::MentalsGateAudioProcessorEditor (MentalsGateAud
         processor.apvts, "mix", mixSlider.slider);
     sidechainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
         processor.apvts, "useSidechain", sidechainToggle);
+    stereoAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (
+        processor.apvts, "stereo", stereoToggle);
 
     setResizable (true, true);
     setResizeLimits (620, 560, 1300, 900);
@@ -235,6 +241,8 @@ void MentalsGateAudioProcessorEditor::resized()
         presetSelector.setBounds (t.removeFromLeft (160));
         t.removeFromLeft (8);
         presetSaveButton.setBounds (t.removeFromLeft (60));
+        t.removeFromLeft (12);
+        stereoToggle.setBounds (t.removeFromLeft (80));
     }
 
     auto panelArea    = area.removeFromBottom (panelHeight);
