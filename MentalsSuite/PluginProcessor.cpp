@@ -255,8 +255,3 @@ void MentalsSuiteAudioProcessor::setStateInformation (const void* data, int size
 
     rebuildConnections();
 }
-
-juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
-{
-    return new MentalsSuiteAudioProcessor();
-}

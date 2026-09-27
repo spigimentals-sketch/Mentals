@@ -79,10 +79,19 @@ add_subdirectory(MentalsChannelStrip)
 add_subdirectory(MentalsMaximizer)
 add_subdirectory(MentalsDoubler)
 add_subdirectory(MentalsImager)
+add_subdirectory(MentalsSampler)
+add_subdirectory(MentalsTrigger)
 
 # ----------------------------------------------------------------------------
 # Mentals Suite chains the plugins above together in one instance -- added
-# last since it links each of their *Core library targets, which must
+# after them since it links each of their *Core library targets, which must
 # already exist.
 # ----------------------------------------------------------------------------
 add_subdirectory(MentalsSuite)
+
+# ----------------------------------------------------------------------------
+# Mentals Live Host hosts one MentalsSuiteAudioProcessor per live mixer
+# channel as that channel's insert chain -- added last since it links
+# MentalsSuiteCore, which must already exist.
+# ----------------------------------------------------------------------------
+add_subdirectory(MentalsLiveHost)

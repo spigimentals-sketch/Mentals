@@ -1,38 +1,34 @@
 # ----------------------------------------------------------------------------
-# Mentals Suite: hosts any number of Mentals plugins chained together inside
-# one instance, reusing each one's own AudioProcessor/Editor unmodified via a
+# Core library: the actual chain-hosting processor/editor code, in its own
+# static library target so Mentals Live Host can link it directly and host
+# one MentalsSuiteAudioProcessor per live mixer channel as that channel's
+# freely user-configurable insert chain, without duplicating any of this
+# chain-hosting logic or rebuilding this plugin's own "+Add Module" UI.
+#
+# Hosts any number of Mentals plugins chained together inside one instance,
+# reusing each one's own AudioProcessor/Editor unmodified via a
 # juce::AudioProcessorGraph (see PluginProcessor.h) -- so it links every
 # other plugin's *Core library directly rather than duplicating any DSP.
 # ----------------------------------------------------------------------------
-juce_add_plugin(MentalsSuite
-    COMPANY_NAME "YourCompany"
-    IS_SYNTH FALSE
-    NEEDS_MIDI_INPUT TRUE
-    NEEDS_MIDI_OUTPUT FALSE
-    IS_MIDI_EFFECT FALSE
-    EDITOR_WANTS_KEYBOARD_FOCUS FALSE
-    COPY_PLUGIN_AFTER_BUILD FALSE
-    PLUGIN_MANUFACTURER_CODE Ycmp
-    PLUGIN_CODE Msui
-    FORMATS AU VST3 Standalone
-    PRODUCT_NAME "Mentals Suite")
+add_library(MentalsSuiteCore STATIC
+    PluginProcessor.cpp
+    PluginEditor.cpp
+    MasterAssistant.cpp)
 
-juce_generate_juce_header(MentalsSuite)
+_juce_initialise_target(MentalsSuiteCore)
 
-target_sources(MentalsSuite
-    PRIVATE
-        PluginProcessor.cpp
-        PluginEditor.cpp
-        MasterAssistant.cpp)
+target_include_directories(MentalsSuiteCore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
-target_compile_definitions(MentalsSuite
+juce_generate_juce_header(MentalsSuiteCore)
+
+target_compile_definitions(MentalsSuiteCore
     PUBLIC
         JUCE_WEB_BROWSER=0
         JUCE_USE_CURL=0
         JUCE_VST3_CAN_REPLACE_VST2=0)
 
-target_link_libraries(MentalsSuite
-    PRIVATE
+target_link_libraries(MentalsSuiteCore
+    PUBLIC
         MentalsUI
         MultiModeEQCore
         MentalsDeEsserCore
@@ -55,10 +51,36 @@ target_link_libraries(MentalsSuite
         MentalsImagerCore
         juce::juce_audio_utils
         juce::juce_dsp
-    PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
+
+# ----------------------------------------------------------------------------
+# The standalone/VST3/AU plugin: just wraps MentalsSuiteCore in JUCE's
+# plugin formats.
+# ----------------------------------------------------------------------------
+juce_add_plugin(MentalsSuite
+    COMPANY_NAME "YourCompany"
+    IS_SYNTH FALSE
+    NEEDS_MIDI_INPUT TRUE
+    NEEDS_MIDI_OUTPUT FALSE
+    IS_MIDI_EFFECT FALSE
+    EDITOR_WANTS_KEYBOARD_FOCUS FALSE
+    COPY_PLUGIN_AFTER_BUILD FALSE
+    PLUGIN_MANUFACTURER_CODE Ycmp
+    PLUGIN_CODE Msui
+    FORMATS AU VST3 Standalone
+    PRODUCT_NAME "Mentals Suite")
+
+juce_generate_juce_header(MentalsSuite)
+
+target_sources(MentalsSuite
+    PRIVATE
+        CreatePluginFilter.cpp)
+
+target_link_libraries(MentalsSuite
+    PRIVATE
+        MentalsSuiteCore)
 
 # ----------------------------------------------------------------------------
 # onnxruntime.dll/.dylib is a runtime dependency of MentalsAutotuneCore/
