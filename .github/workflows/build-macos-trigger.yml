@@ -1,0 +1,107 @@
+name: Build macOS - Mentals Trigger Only
+
+# Builds just Mentals Trigger (AU + VST3 + Standalone) on a real macOS
+# runner and zips the result -- a faster, narrower alternative to
+# build-macos.yml (which builds and packages every plugin in the suite)
+# for when only this one plugin is needed. Mentals Trigger has no AI
+# features, so unlike build-macos.yml this never touches ONNX Runtime at
+# all -- configuring the full project still declares that imported target,
+# but nothing here links it, so its files never need to exist for this to
+# succeed.
+#
+# Apple Silicon (arm64) only, same reasoning as build-macos.yml: this
+# project's other AI-using plugins pin an arm64-only ONNX Runtime release,
+# and while that doesn't affect Trigger itself, keeping every Mac target in
+# this project on one consistent architecture avoids confusion. macos-14
+# runners are themselves Apple Silicon hardware, so this is a native (not
+# cross-compiled) build covering every Mac from 2020 onward.
+#
+# Manual trigger only -- deliberately NOT on push, matching the rest of
+# this project's Mac CI. Run this from the Actions tab (or
+# `gh workflow run build-macos-trigger.yml`) whenever a fresh Trigger build
+# is needed.
+on:
+  workflow_dispatch: {}
+
+jobs:
+  build-macos-trigger:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Clone JUCE (pinned to the version vendored locally)
+        run: git clone --depth 1 --branch 8.0.14 https://github.com/juce-framework/JUCE.git JUCE
+
+      - name: Install Ninja
+        run: brew install ninja
+
+      - name: Configure CMake
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+
+      - name: Build Mentals Trigger (AU + VST3 + Standalone)
+        run: |
+          cmake --build build --config Release -j "$(sysctl -n hw.ncpu)" \
+            --target MentalsTrigger_AU MentalsTrigger_VST3 MentalsTrigger_Standalone
+
+      - name: Package into a zip
+        run: |
+          set -euo pipefail
+          STAGING_DIR="installer/trigger_staging"
+          OUTPUT_DIR="installer/output"
+          rm -rf "$STAGING_DIR"
+          mkdir -p "$STAGING_DIR/VST3" "$STAGING_DIR/Components (AU)" "$STAGING_DIR/Standalone App" "$OUTPUT_DIR"
+
+          find build -type d -path "*/Release/VST3/*.vst3" -maxdepth 6 -exec cp -R {} "$STAGING_DIR/VST3/" \;
+          find build -type d -path "*/Release/AU/*.component" -maxdepth 6 -exec cp -R {} "$STAGING_DIR/Components (AU)/" \;
+          find build -type d -path "*/Release/Standalone/*.app" -maxdepth 6 -exec cp -R {} "$STAGING_DIR/Standalone App/" \;
+
+          vst3Count=$(find "$STAGING_DIR/VST3" -maxdepth 1 -name "*.vst3" | wc -l | tr -d ' ')
+          auCount=$(find "$STAGING_DIR/Components (AU)" -maxdepth 1 -name "*.component" | wc -l | tr -d ' ')
+          appCount=$(find "$STAGING_DIR/Standalone App" -maxdepth 1 -name "*.app" | wc -l | tr -d ' ')
+          echo "Staged $vst3Count VST3 bundle(s), $auCount AU component(s), $appCount Standalone app(s)."
+
+          if [ "$vst3Count" -eq 0 ] || [ "$auCount" -eq 0 ] || [ "$appCount" -eq 0 ]; then
+            echo "ERROR: one or more plugin formats produced zero bundles -- the build likely failed partway through." >&2
+            exit 1
+          fi
+
+          cat > "$STAGING_DIR/Read Me - Install Instructions.txt" << 'EOF'
+          Mentals Trigger -- macOS Install Instructions
+          ==============================================
+
+          This build is produced by this project's own CI and is NOT
+          notarized/code-signed by Apple, so Gatekeeper will block it the
+          first time you open it. For each item you copy into place below:
+          right-click it -> Open -> Open (once) -- or, in Terminal, run:
+              xattr -dr com.apple.quarantine "<path to the item you copied>"
+
+          1. VST3 plugin
+             Copy "Mentals Trigger.vst3" into:
+               ~/Library/Audio/Plug-Ins/VST3/
+
+          2. Audio Unit (AU) plugin
+             Copy "Mentals Trigger.component" into:
+               ~/Library/Audio/Plug-Ins/Components/
+
+          3. Standalone app
+             Copy "Mentals Trigger.app" into /Applications, or run it from
+             wherever you like.
+
+          Apple Silicon only: this build targets arm64 (M1 and later). It
+          will not run on an Intel Mac.
+          EOF
+
+          ditto -c -k --sequesterRsrc --keepParent "$STAGING_DIR" "$OUTPUT_DIR/MentalsTrigger-macOS.zip"
+          echo "Created $OUTPUT_DIR/MentalsTrigger-macOS.zip"
+
+      - name: Upload zip artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MentalsTrigger-macOS
+          path: installer/output/*.zip
