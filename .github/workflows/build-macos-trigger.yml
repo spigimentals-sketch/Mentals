@@ -37,6 +37,21 @@ jobs:
       - name: Install Ninja
         run: brew install ninja
 
+      - name: Create placeholder ONNX Runtime paths
+        # Mentals Trigger itself never uses ONNX Runtime, but several other
+        # plugins' CMakeLists.txt unconditionally declare the `onnxruntime`
+        # imported target and reference these paths in its
+        # INTERFACE_INCLUDE_DIRECTORIES/IMPORTED_LOCATION -- CMake validates
+        # that target for every plugin's CMakeLists.txt during configure,
+        # regardless of which targets are later actually built, so the
+        # include directory has to exist even though nothing here ever
+        # builds against real ONNX Runtime headers. An empty placeholder is
+        # enough since we only ever compile Mentals Trigger's own sources.
+        run: |
+          mkdir -p ThirdParty/onnxruntime/include
+          mkdir -p ThirdParty/onnxruntime/lib
+          touch ThirdParty/onnxruntime/lib/libonnxruntime.dylib
+
       - name: Configure CMake
         run: |
           cmake -S . -B build -G Ninja \
